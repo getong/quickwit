@@ -131,8 +131,8 @@ macro_rules! return_if_err {
 
 impl ConsumerContext for RdKafkaContext {
     fn pre_rebalance(&self, rebalance: &Rebalance) {
-        if let Rebalance::Assign(tpl) = rebalance {
-            let partitions = collect_partitions(tpl, &self.topic);
+        if let Rebalance::Assign(topic_partition_list) = rebalance {
+            let partitions = collect_partitions(topic_partition_list, &self.topic);
             debug!(partitions=?partitions, "Assign partitions.");
 
             let (assignment_tx, assignment_rx) = oneshot::channel();
@@ -143,7 +143,7 @@ impl ConsumerContext for RdKafkaContext {
                 }),
                 "Failed to send assign message to source."
             );
-            let assignment = return_if_err!(
+            let assignment: Vec<(i32, Offset)> = return_if_err!(
                 assignment_rx.recv(),
                 "Failed to receive assignment from source."
             );
@@ -153,7 +153,7 @@ impl ConsumerContext for RdKafkaContext {
                 "New partition assignment"
             );
             for (partition, offset) in assignment {
-                let mut partition = tpl
+                let mut partition = topic_partition_list
                     .find_partition(&self.topic, partition)
                     .expect("Failed to find partition in assignment. This should never happen! Please, report on https://github.com/quickwit-oss/quickwit/issues.");
                 partition
@@ -176,6 +176,8 @@ impl ConsumerContext for RdKafkaContext {
     }
 }
 
+/// Checks that all of the partitions in the `topic partition list` belong
+/// to the same topic and returns the list of partitions.
 fn collect_partitions(tpl: &TopicPartitionList, topic: &str) -> Vec<i32> {
     tpl.elements()
         .iter()
@@ -212,6 +214,8 @@ pub struct KafkaSource {
     backfill_mode_enabled: bool,
     events_rx: mpsc::Receiver<KafkaEvent>,
     consumer: Arc<RdKafkaConsumer>,
+    // Handle associated the blocking task polling the librdkafka
+    // client.
     poll_loop_jh: JoinHandle<()>,
 }
 
@@ -249,9 +253,8 @@ impl KafkaSource {
             .with_context(|| format!("Failed to subscribe to topic `{topic}`."))?;
         let poll_loop_jh = spawn_consumer_poll_loop(consumer.clone(), events_tx);
 
-        let state = KafkaSourceState {
-            ..Default::default()
-        };
+        let state = KafkaSourceState::default();
+
         Ok(KafkaSource {
             ctx,
             topic,
@@ -343,7 +346,7 @@ impl KafkaSource {
         self.state.num_inactive_partitions = 0;
         self.state.assigned_partitions = partitions
             .iter()
-            .map(|partition| (*partition, PartitionId::from(*partition as i64)))
+            .map(|&partition| (partition, PartitionId::from(partition as i64)))
             .collect();
         Ok(())
     }
@@ -365,7 +368,7 @@ impl KafkaSource {
         info!(
             topic=%self.topic,
             partition=%partition,
-            num_inactive_partitions=?self.state.num_inactive_partitions,
+            num_inactive_partitions=%self.state.num_inactive_partitions,
             "Reached end of partition."
         );
     }

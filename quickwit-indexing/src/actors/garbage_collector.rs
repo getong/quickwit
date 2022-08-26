@@ -220,7 +220,7 @@ mod tests {
         };
         let garbage_collect_actor = GarbageCollector::new(
             pipeline_id,
-            IndexingSplitStore::create_with_no_local_store(Arc::new(mock_storage)),
+            IndexingSplitStore::without_local_store(Arc::new(mock_storage)),
             Arc::new(mock_metastore),
         );
         let universe = Universe::new();
@@ -279,7 +279,7 @@ mod tests {
         };
         let garbage_collect_actor = GarbageCollector::new(
             pipeline_id,
-            IndexingSplitStore::create_with_no_local_store(Arc::new(mock_storage)),
+            IndexingSplitStore::without_local_store(Arc::new(mock_storage)),
             Arc::new(mock_metastore),
         );
         let universe = Universe::new();

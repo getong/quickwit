@@ -227,8 +227,7 @@ impl IndexingPipeline {
             merge_policy=?merge_policy,
             "Spawning indexing pipeline.",
         );
-        let split_store = IndexingSplitStore::create_with_local_store(
-            self.params.storage.clone(),
+        let split_store = IndexingSplitStore::with_local_store(
             self.params.indexing_directory.cache_directory.as_path(),
             IndexingSplitStoreParams {
                 max_num_bytes: self.params.split_store_max_num_bytes,
@@ -236,6 +235,12 @@ impl IndexingPipeline {
             },
             merge_policy.clone(),
         )?;
+        split_store
+            .register_remote_storage(
+                &self.params.pipeline_id.index_id,
+                self.params.storage.clone(),
+            )
+            .await;
         let published_splits = self
             .params
             .metastore

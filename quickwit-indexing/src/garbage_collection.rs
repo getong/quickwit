@@ -172,7 +172,9 @@ pub async fn delete_splits_with_files(
             let moved_indexing_split_store = indexing_split_store.clone();
             async move {
                 let file_entry = FileEntry::from(&split);
-                let delete_result = moved_indexing_split_store.delete(split.split_id()).await;
+                let delete_result = moved_indexing_split_store
+                    .delete(index_id, split.split_id())
+                    .await;
                 if let Some(ctx) = ctx_opt {
                     ctx.record_progress();
                 }

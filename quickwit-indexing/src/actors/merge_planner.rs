@@ -137,7 +137,9 @@ impl MergePlanner {
     ) -> Result<(), ActorExitStatus> {
         for partition_id in target_partition_ids {
             if let Some(young_splits) = self.partitioned_young_splits.get_mut(partition_id) {
-                let merge_operations = self.merge_policy.operations(young_splits);
+                let merge_operations = self
+                    .merge_policy
+                    .operations(self.pipeline_id.index_id.clone(), young_splits);
 
                 for merge_operation in merge_operations {
                     info!(merge_operation=?merge_operation, "Planned merge operation.");

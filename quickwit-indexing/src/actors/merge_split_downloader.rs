@@ -56,22 +56,26 @@ impl Handler<MergeOperation> for MergeSplitDownloader {
     fn message_span(&self, msg_id: u64, merge_operation: &MergeOperation) -> Span {
         match merge_operation {
             MergeOperation::Merge {
+                index_id,
                 merge_split_id,
                 splits,
             } => {
                 let num_docs: usize = splits.iter().map(|split| split.num_docs).sum();
                 info_span!("merge",
+                    index_id=%index_id,
                     msg_id=&msg_id,
                     merge_split_id=%merge_split_id,
                     num_docs=num_docs,
                     num_splits=splits.len())
             }
             MergeOperation::Demux {
+                index_id,
                 demux_split_ids,
                 splits,
             } => {
                 let num_docs: usize = splits.iter().map(|split| split.num_docs).sum();
                 info_span!("demux",
+                    index_id=%index_id,
                     msg_id=&msg_id,
                     demux_split_ids=?demux_split_ids,
                     num_docs=num_docs,
@@ -95,6 +99,7 @@ impl Handler<MergeOperation> for MergeSplitDownloader {
             .map_err(|error| anyhow::anyhow!(error))?;
         let tantivy_dirs = self
             .download_splits(
+                merge_operation.index_id(),
                 merge_operation.splits(),
                 downloaded_splits_directory.path(),
                 ctx,
@@ -114,12 +119,13 @@ impl Handler<MergeOperation> for MergeSplitDownloader {
 impl MergeSplitDownloader {
     async fn download_splits(
         &self,
+        index_id: &str,
         splits: &[SplitMetadata],
         download_directory: &Path,
         ctx: &ActorContext<Self>,
     ) -> Result<Vec<Box<dyn Directory>>, quickwit_actors::ActorExitStatus> {
-        // we download all of the split files in the scratch directory.
-        let mut tantivy_dirs = vec![];
+        // Download all the split files in the scratch directory.
+        let mut tantivy_dirs = Vec::new();
         for split in splits {
             if ctx.kill_switch().is_dead() {
                 warn!(split_id=?split.split_id(), "Kill switch was activated. Cancelling download.");
@@ -128,7 +134,7 @@ impl MergeSplitDownloader {
             let _protect_guard = ctx.protect_zone();
             let tantivy_dir = self
                 .storage
-                .fetch_split(split.split_id(), download_directory)
+                .fetch_split(index_id, split.split_id(), download_directory)
                 .await
                 .map_err(|error| {
                     let split_id = split.split_id();
@@ -174,7 +180,7 @@ mod tests {
                 storage_builder = storage_builder.put(&split_file(split.split_id()), &buffer);
             }
             let ram_storage = storage_builder.build();
-            IndexingSplitStore::create_with_no_local_store(Arc::new(ram_storage))
+            IndexingSplitStore::without_local_store(Arc::new(ram_storage))
         };
 
         let universe = Universe::new();

@@ -30,28 +30,37 @@ use crate::new_split_id;
 
 pub enum MergeOperation {
     Merge {
+        index_id: String,
         merge_split_id: String,
         splits: Vec<SplitMetadata>,
     },
     Demux {
+        index_id: String,
         demux_split_ids: Vec<String>,
         splits: Vec<SplitMetadata>,
     },
 }
 
 impl MergeOperation {
-    pub fn new_merge_operation(splits: Vec<SplitMetadata>) -> MergeOperation {
+    pub fn new_merge_operation(index_id: String, splits: Vec<SplitMetadata>) -> MergeOperation {
         MergeOperation::Merge {
+            index_id,
             merge_split_id: new_split_id(),
             splits,
         }
     }
 
+    pub fn index_id(&self) -> &str {
+        match self {
+            MergeOperation::Merge { index_id, .. } | MergeOperation::Demux { index_id, .. } => {
+                index_id
+            }
+        }
+    }
+
     pub fn splits(&self) -> &[SplitMetadata] {
         match self {
-            MergeOperation::Merge { splits, .. } | MergeOperation::Demux { splits, .. } => {
-                splits.as_slice()
-            }
+            MergeOperation::Merge { splits, .. } | MergeOperation::Demux { splits, .. } => splits,
         }
     }
 }
@@ -62,6 +71,7 @@ impl fmt::Debug for MergeOperation {
             MergeOperation::Merge {
                 merge_split_id: split_id,
                 splits,
+                ..
             } => {
                 write!(f, "Merge(merged_split_id={},splits=[", split_id)?;
                 for split in splits {
@@ -72,6 +82,7 @@ impl fmt::Debug for MergeOperation {
             MergeOperation::Demux {
                 demux_split_ids,
                 splits,
+                ..
             } => {
                 write!(f, "Merge(demux_splits=[")?;
                 for split_id in demux_split_ids {
@@ -95,8 +106,9 @@ impl fmt::Debug for MergeOperation {
 pub trait MergePolicy: Send + Sync + fmt::Debug {
     /// Returns the list of operations that should be performed either
     /// merge or demux operations.
-    fn operations(&self, splits: &mut Vec<SplitMetadata>) -> Vec<MergeOperation>;
-    /// A mature split is a split that won't undergo merge or demux operation in the future.
+    fn operations(&self, index_id: String, splits: &mut Vec<SplitMetadata>) -> Vec<MergeOperation>;
+
+    /// A mature split is a split that won't undergo a merge or demux operation in the future.
     fn is_mature(&self, split: &SplitMetadata) -> bool;
 }
 
@@ -205,10 +217,10 @@ fn splits_short_debug(splits: &[SplitMetadata]) -> Vec<SplitShortDebug> {
 }
 
 impl MergePolicy for StableMultitenantWithTimestampMergePolicy {
-    fn operations(&self, splits: &mut Vec<SplitMetadata>) -> Vec<MergeOperation> {
+    fn operations(&self, index_id: String, splits: &mut Vec<SplitMetadata>) -> Vec<MergeOperation> {
         let original_num_splits = splits.len();
-        let mut operations = self.merge_operations(splits);
-        operations.append(&mut self.demux_operations(splits));
+        let mut operations = self.merge_operations(index_id.clone(), splits);
+        operations.append(&mut self.demux_operations(index_id, splits));
         debug_assert_eq!(
             original_num_splits,
             operations.iter().map(|op| op.splits().len()).sum::<usize>() + splits.len(),
@@ -286,7 +298,11 @@ impl StableMultitenantWithTimestampMergePolicy {
         split.num_docs < self.split_num_docs_target || split.demux_num_ops > 0
     }
 
-    fn merge_operations(&self, splits: &mut Vec<SplitMetadata>) -> Vec<MergeOperation> {
+    fn merge_operations(
+        &self,
+        index_id: String,
+        splits: &mut Vec<SplitMetadata>,
+    ) -> Vec<MergeOperation> {
         if !self.merge_enabled || splits.len() < 2 {
             return Vec::new();
         }
@@ -312,7 +328,8 @@ impl StableMultitenantWithTimestampMergePolicy {
             if let Some(merge_range) = self.merge_candidate_from_level(splits, split_range) {
                 debug!(merge_range=?merge_range, "merge-candidate");
                 let splits_in_merge: Vec<SplitMetadata> = splits.drain(merge_range).collect();
-                let merge_operation = MergeOperation::new_merge_operation(splits_in_merge);
+                let merge_operation =
+                    MergeOperation::new_merge_operation(index_id.clone(), splits_in_merge);
                 merge_operations.push(merge_operation);
             } else {
                 debug!("no-merge");
@@ -326,7 +343,11 @@ impl StableMultitenantWithTimestampMergePolicy {
     /// < `max_merge_docs * demux_factor` and have been demux less than `max-demux_generation`
     /// times.
     /// We might authorize several demuxing in the future.
-    fn demux_operations(&self, splits: &mut Vec<SplitMetadata>) -> Vec<MergeOperation> {
+    fn demux_operations(
+        &self,
+        index_id: String,
+        splits: &mut Vec<SplitMetadata>,
+    ) -> Vec<MergeOperation> {
         if !self.demux_enabled || self.demux_field_name.is_none() || splits.is_empty() {
             return Vec::new();
         }
@@ -345,7 +366,7 @@ impl StableMultitenantWithTimestampMergePolicy {
                 .as_ref()
                 .map(|time_range| *time_range.end())
         });
-        merge_operations.append(&mut self.build_first_demux_operation(splits));
+        merge_operations.append(&mut self.build_first_demux_operation(index_id, splits));
         splits.extend(excluded_splits);
         merge_operations
     }
@@ -358,6 +379,7 @@ impl StableMultitenantWithTimestampMergePolicy {
     /// build a demux operation with it, and loop.
     pub(crate) fn build_first_demux_operation(
         &self,
+        index_id: String,
         splits: &mut Vec<SplitMetadata>,
     ) -> Vec<MergeOperation> {
         assert!(self.demux_factor > 1, "Demux factor must be > 1");
@@ -397,6 +419,7 @@ impl StableMultitenantWithTimestampMergePolicy {
             let splits_for_demux: Vec<SplitMetadata> = splits.drain(0..end_split_idx + 1).collect();
             total_num_docs_left -= num_docs_to_demux;
             let merge_operation = MergeOperation::Demux {
+                index_id: index_id.clone(),
                 demux_split_ids: (0..self.demux_factor).map(|_| new_split_id()).collect_vec(),
                 splits: splits_for_demux,
             };

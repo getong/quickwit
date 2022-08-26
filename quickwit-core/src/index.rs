@@ -223,7 +223,7 @@ impl IndexService {
             .map(|metadata| metadata.split_metadata)
             .collect::<Vec<_>>();
 
-        let split_store = IndexingSplitStore::create_with_no_local_store(storage);
+        let split_store = IndexingSplitStore::without_local_store(storage);
         let deleted_entries = delete_splits_with_files(
             index_id,
             split_store,
@@ -249,7 +249,7 @@ impl IndexService {
     ) -> anyhow::Result<Vec<FileEntry>> {
         let index_uri = self.metastore.index_metadata(index_id).await?.index_uri;
         let storage = self.storage_resolver.resolve(&index_uri)?;
-        let split_store = IndexingSplitStore::create_with_no_local_store(storage);
+        let split_store = IndexingSplitStore::without_local_store(storage);
 
         let deleted_entries = run_garbage_collect(
             index_id,
@@ -288,7 +288,7 @@ impl IndexService {
             .into_iter()
             .map(|split| split.split_metadata)
             .collect();
-        let split_store = IndexingSplitStore::create_with_no_local_store(storage);
+        let split_store = IndexingSplitStore::without_local_store(storage);
         // FIXME: return an error.
         if let Err(err) = delete_splits_with_files(
             index_id,

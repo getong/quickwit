@@ -83,6 +83,7 @@ impl Handler<MergeScratch> for MergeExecutor {
     fn message_span(&self, msg_id: u64, merge_scratch: &MergeScratch) -> Span {
         match &merge_scratch.merge_operation {
             MergeOperation::Merge {
+                index_id,
                 merge_split_id,
                 splits,
             } => {
@@ -92,6 +93,7 @@ impl Handler<MergeScratch> for MergeExecutor {
                     .map(|split| split.split_id().to_string())
                     .collect();
                 info_span!("merge",
+                    index_id=%index_id,
                     msg_id=&msg_id,
                     dir=%merge_scratch.merge_scratch_directory.path().display(),
                     merge_split_id=%merge_split_id,
@@ -100,6 +102,7 @@ impl Handler<MergeScratch> for MergeExecutor {
                     num_splits=splits.len())
             }
             MergeOperation::Demux {
+                index_id,
                 demux_split_ids,
                 splits,
             } => {
@@ -109,6 +112,7 @@ impl Handler<MergeScratch> for MergeExecutor {
                     .map(|split| split.split_id().to_string())
                     .collect();
                 info_span!("demux",
+                    index_id=%index_id,
                     msg_id=&msg_id,
                     dir=%merge_scratch.merge_scratch_directory.path().display(),
                     demux_split_ids=?demux_split_ids,
@@ -126,11 +130,12 @@ impl Handler<MergeScratch> for MergeExecutor {
     ) -> Result<(), ActorExitStatus> {
         match merge_scratch.merge_operation {
             MergeOperation::Merge {
-                merge_split_id: split_id,
+                merge_split_id,
                 splits,
+                ..
             } => {
                 self.process_merge(
-                    split_id,
+                    merge_split_id,
                     splits,
                     merge_scratch.tantivy_dirs,
                     merge_scratch.merge_scratch_directory,
@@ -141,6 +146,7 @@ impl Handler<MergeScratch> for MergeExecutor {
             MergeOperation::Demux {
                 demux_split_ids,
                 splits,
+                ..
             } => {
                 self.process_demux(
                     demux_split_ids,

@@ -265,6 +265,7 @@ async fn stage_and_upload_split(
     info!(split_id=%packaged_split.split_id, "storing-split");
     split_store
         .store_split(
+            &packaged_split.pipeline_id.index_id,
             &split_metadata,
             packaged_split.split_scratch_directory.path(),
             Box::new(split_streamer),
@@ -310,7 +311,7 @@ mod tests {
             .returning(|_, _| Ok(()));
         let ram_storage = RamStorage::default();
         let index_storage: IndexingSplitStore =
-            IndexingSplitStore::create_with_no_local_store(Arc::new(ram_storage.clone()));
+            IndexingSplitStore::without_local_store(Arc::new(ram_storage.clone()));
         let uploader = Uploader::new(
             "TestUploader",
             Arc::new(mock_metastore),
@@ -401,7 +402,7 @@ mod tests {
             .returning(|_, _| Ok(()));
         let ram_storage = RamStorage::default();
         let index_storage: IndexingSplitStore =
-            IndexingSplitStore::create_with_no_local_store(Arc::new(ram_storage.clone()));
+            IndexingSplitStore::without_local_store(Arc::new(ram_storage.clone()));
         let uploader = Uploader::new(
             "TestUploader",
             Arc::new(mock_metastore),

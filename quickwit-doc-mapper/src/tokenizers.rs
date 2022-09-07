@@ -17,14 +17,103 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+use std::str::CharIndices;
+
 use once_cell::sync::Lazy;
-use tantivy::tokenizer::{RawTokenizer, RemoveLongFilter, TextAnalyzer, TokenizerManager};
+use regex::Regex;
+use tantivy::tokenizer::{
+    BoxTokenStream, RawTokenizer, RemoveLongFilter, TextAnalyzer, Token, TokenStream, Tokenizer,
+    TokenizerManager,
+};
+
+static VALID_CHAR_IN_NUMBER: Lazy<Regex> = Lazy::new(|| Regex::new("[-%_.:a-zA-Z]").unwrap());
+
+/// Tokenize the text without splitting on ".", "-" and "_" in numbers.
+#[derive(Clone)]
+pub struct LogTokenizer;
+
+pub struct LogTokenStream<'a> {
+    text: &'a str,
+    chars: CharIndices<'a>,
+    token: Token,
+}
+
+impl Tokenizer for LogTokenizer {
+    fn token_stream<'a>(&self, text: &'a str) -> BoxTokenStream<'a> {
+        BoxTokenStream::from(LogTokenStream {
+            text,
+            chars: text.char_indices(),
+            token: Token::default(),
+        })
+    }
+}
+
+impl<'a> LogTokenStream<'a> {
+    fn search_token_end(&mut self) -> usize {
+        (&mut self.chars)
+            .filter(|&(_, ref c)| *c != '%' && !c.is_alphanumeric())
+            .map(|(offset, _)| offset)
+            .next()
+            .unwrap_or(self.text.len())
+    }
+
+    fn handle_chars_in_number(&mut self) -> usize {
+        (&mut self.chars)
+            .filter(|&(_, ref c)| {
+                !(c.is_alphanumeric() || VALID_CHAR_IN_NUMBER.is_match(&c.to_string()))
+            })
+            .map(|(offset, _)| offset)
+            .next()
+            .unwrap_or(self.text.len())
+    }
+
+    fn push_token(&mut self, offset_from: usize, offset_to: usize) {
+        self.token.offset_from = offset_from;
+        self.token.offset_to = offset_to;
+        self.token.text.push_str(&self.text[offset_from..offset_to]);
+    }
+}
+
+impl<'a> TokenStream for LogTokenStream<'a> {
+    fn advance(&mut self) -> bool {
+        self.token.text.clear();
+        self.token.position = self.token.position.wrapping_add(1);
+        while let Some((offset_from, c)) = self.chars.next() {
+            // if the token starts with a number, it must be handled differently
+            if c.is_numeric() {
+                let offset_to = self.handle_chars_in_number();
+                self.push_token(offset_from, offset_to);
+
+                return true;
+            } else if c.is_alphabetic() {
+                let offset_to = self.search_token_end();
+                self.push_token(offset_from, offset_to);
+
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn token(&self) -> &Token {
+        &self.token
+    }
+
+    fn token_mut(&mut self) -> &mut Token {
+        &mut self.token
+    }
+}
 
 fn get_quickwit_tokenizer_manager() -> TokenizerManager {
     let raw_tokenizer = TextAnalyzer::from(RawTokenizer).filter(RemoveLongFilter::limit(100));
 
+    // TODO eventually check for other restrictions
+    let log_tokenizer = TextAnalyzer::from(LogTokenizer).filter(RemoveLongFilter::limit(100));
+
     let tokenizer_manager = TokenizerManager::default();
     tokenizer_manager.register("raw", raw_tokenizer);
+    tokenizer_manager.register("log", log_tokenizer);
     tokenizer_manager
 }
 
@@ -32,11 +121,12 @@ fn get_quickwit_tokenizer_manager() -> TokenizerManager {
 pub static QUICKWIT_TOKENIZER_MANAGER: Lazy<TokenizerManager> =
     Lazy::new(get_quickwit_tokenizer_manager);
 
+
 #[test]
 fn raw_tokenizer_test() {
     let my_haiku = r#"
         white sandy beach
-        a strong wind is coming 
+        a strong wind is coming
         sand in my face
         "#;
     let my_long_text = "a text, that is just too long, no one will type it, no one will like it, \
@@ -47,4 +137,355 @@ fn raw_tokenizer_test() {
     assert!(haiku_stream.advance());
     assert!(!haiku_stream.advance());
     assert!(!tokenizer.token_stream(my_long_text).advance());
+}
+
+#[cfg(test)]
+mod tests {
+    use tantivy::tokenizer::{SimpleTokenizer, TextAnalyzer};
+
+    use crate::tokenizers::get_quickwit_tokenizer_manager;
+
+    #[test]
+    fn log_tokenizer_basic_test() {
+        let numbers = "255.255.255.255 test \n\ttest\t 27-05-2022 \t\t  \n \tat\r\n 02:51";
+        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
+        let mut token_stream = tokenizer.token_stream(numbers);
+        let array_ref: [&str; 6] = [
+            "255.255.255.255",
+            "test",
+            "test",
+            "27-05-2022",
+            "at",
+            "02:51",
+        ];
+
+        array_ref.iter().for_each(|ref_token| {
+            if token_stream.advance() {
+                assert_eq!(&token_stream.token().text, ref_token)
+            } else {
+                panic!()
+            }
+        });
+    }
+
+    // The only difference with the default tantivy is within numbers, this test is
+    // to check if the behaviour is affected
+    #[test]
+    fn log_tokenizer_compare_with_simple() {
+        let test_string = "this,is,the,test 42 here\n3932\t20dk,3093raopxa'wd";
+        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
+        let ref_tokenizer = TextAnalyzer::from(SimpleTokenizer);
+        let mut token_stream = tokenizer.token_stream(test_string);
+        let mut ref_token_stream = ref_tokenizer.token_stream(test_string);
+
+        while token_stream.advance() && ref_token_stream.advance() {
+            assert_eq!(&token_stream.token().text, &ref_token_stream.token().text);
+        }
+
+        assert!(!(token_stream.advance() || ref_token_stream.advance()));
+    }
+
+    // The tokenizer should still be able to work on normal texts
+    #[test]
+    fn log_tokenizer_basic_text() {
+        let test_string = r#"
+        Aujourd'hui, maman est morte. Ou peut-
+    être hier, je ne sais pas. J'ai reçu un télégramme de l'asile : « Mère décédée. Enterrement demain. Sentiments distingués.»
+    Cela ne veut rien dire. C'était peut-être
+    hier.
+        "#;
+        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
+        let ref_tokenizer = TextAnalyzer::from(SimpleTokenizer);
+        let mut token_stream = tokenizer.token_stream(test_string);
+        let mut ref_token_stream = ref_tokenizer.token_stream(test_string);
+
+        while token_stream.advance() && ref_token_stream.advance() {
+            assert_eq!(&token_stream.token().text, &ref_token_stream.token().text);
+        }
+
+        assert!(!(token_stream.advance() || ref_token_stream.advance()));
+    }
+
+    #[test]
+    fn log_tokenizer_log_test() {
+        let test_string = "Dec 10 06:55:48 LabSZ sshd[24200]: Failed password for invalid user \
+                           webmaster from 173.234.31.186 port 38926 ssh2";
+        let array_ref: [&str; 17] = [
+            "Dec",
+            "10",
+            "06:55:48",
+            "LabSZ",
+            "sshd",
+            "24200",
+            "Failed",
+            "password",
+            "for",
+            "invalid",
+            "user",
+            "webmaster",
+            "from",
+            "173.234.31.186",
+            "port",
+            "38926",
+            "ssh2",
+        ];
+        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
+        let mut token_stream = tokenizer.token_stream(test_string);
+
+        array_ref.iter().for_each(|ref_token| {
+            if token_stream.advance() {
+                assert_eq!(&token_stream.token().text, ref_token)
+            } else {
+                panic!()
+            }
+        });
+    }
+
+    #[test]
+    fn log_tokenizer_log_2() {
+        let test_string = "1331901000.000000    CHEt7z3AzG4gyCNgci    192.168.202.79    50465    \
+                           192.168.229.251    80    1    HEAD 192.168.229.251    /DEASLog02.nsf    \
+                           -    Mozilla/5.0";
+        let array_ref: [&str; 13] = [
+            "1331901000.000000",
+            "CHEt7z3AzG4gyCNgci",
+            "192.168.202.79",
+            "50465",
+            "192.168.229.251",
+            "80",
+            "1",
+            "HEAD",
+            "192.168.229.251",
+            "DEASLog02",
+            "nsf",
+            "Mozilla",
+            "5.0",
+        ];
+        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
+        let mut token_stream = tokenizer.token_stream(test_string);
+
+        array_ref.iter().for_each(|ref_token| {
+            if token_stream.advance() {
+                assert_eq!(&token_stream.token().text, ref_token)
+            } else {
+                panic!()
+            }
+        });
+    }
+
+    #[test]
+    fn log_tokenizer_log_test_http() {
+        let test_string = "{\"message\" : \"211.11.9.0 - - [1998-06-21T15:00:01-05:00] \"GET \
+                           /english/index.html HTTP/1.0\" 304 0\"}";
+        let array_ref: [&str; 11] = [
+            "message",
+            "211.11.9.0",
+            "1998-06-21T15:00:01-05:00",
+            "GET",
+            "english",
+            "index",
+            "html",
+            "HTTP",
+            "1.0",
+            "304",
+            "0",
+        ];
+        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
+        let mut token_stream = tokenizer.token_stream(test_string);
+
+        array_ref.iter().for_each(|ref_token| {
+            if token_stream.advance() {
+                assert_eq!(&token_stream.token().text, ref_token)
+            } else {
+                panic!()
+            }
+        });
+    }
+
+    #[test]
+    fn log_tokenizer_log_wsa() {
+        let test_string = "54.36.149.41 - - [22/Jan/2019:03:56:14 +0330] \"GET /filter/27|13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,27|%DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,p53 HTTP/1.1\" 200 30577 \"-\" \"Mozilla/5.0 (compatible; AhrefsBot/6.1; +http://ahrefs.com/robot/)\" \"-\"
+31.56.96.51 - - [22/Jan/2019:03:56:16 +0330] \"GET /image/60844/productModel/200x200 HTTP/1.1\" 200 5667 \"https://www.zanbil.ir/m/filter/b113\" \"Mozilla/5.0 (Linux; Android 6.0; ALE-L21 Build/HuaweiALE-L21) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.158 Mobile Safari/537.36\" \"-\"
+31.56.96.51 - - [22/Jan/2019:03:56:16 +0330] \"GET /image/61474/productModel/200x200 HTTP/1.1\" 200 5379 \"https://www.zanbil.ir/m/filter/b113\" \"Mozilla/5.0 (Linux; Android 6.0; ALE-L21 Build/HuaweiALE-L21) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.158 Mobile Safari/537.36\" \"-\"
+40.77.167.129 - - [22/Jan/2019:03:56:17 +0330] \"GET /image/14925/productModel/100x100 HTTP/1.1\" 200 1696 \"-\" \"Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)\" \"-\"
+91.99.72.15 - - [22/Jan/2019:03:56:17 +0330] \"GET /product/31893/62100/%D8%B3%D8%B4%D9%88%D8%A7%D8%B1-%D8%AE%D8%A7%D9%86%DA%AF%DB%8C-%D9%BE%D8%B1%D9%86%D8%B3%D9%84%DB%8C-%D9%85%D8%AF%D9%84-PR257AT HTTP/1.1\" 200 41483 \"-\" \"Mozilla/5.0 (Windows NT 6.2; Win64; x64; rv:16.0)Gecko/16.0 Firefox/16.0\" \"-\"";
+
+        // This was generated obviously
+        // TODO This test is ugly, maybe put it in another file ?
+        let array_ref: [&str; 163] = [
+            "54.36.149.41",
+            "22",
+            "Jan",
+            "2019:03:56:14",
+            "0330",
+            "GET",
+            "filter",
+            "27",
+            "13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84",
+            "27",
+            "DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%\
+             B3%D9%84",
+            "p53",
+            "HTTP",
+            "1.1",
+            "200",
+            "30577",
+            "Mozilla",
+            "5.0",
+            "compatible",
+            "AhrefsBot",
+            "6.1",
+            "http",
+            "ahrefs",
+            "com",
+            "robot",
+            "31.56.96.51",
+            "22",
+            "Jan",
+            "2019:03:56:16",
+            "0330",
+            "GET",
+            "image",
+            "60844",
+            "productModel",
+            "200x200",
+            "HTTP",
+            "1.1",
+            "200",
+            "5667",
+            "https",
+            "www",
+            "zanbil",
+            "ir",
+            "m",
+            "filter",
+            "b113",
+            "Mozilla",
+            "5.0",
+            "Linux",
+            "Android",
+            "6.0",
+            "ALE",
+            "L21",
+            "Build",
+            "HuaweiALE",
+            "L21",
+            "AppleWebKit",
+            "537.36",
+            "KHTML",
+            "like",
+            "Gecko",
+            "Chrome",
+            "66.0.3359.158",
+            "Mobile",
+            "Safari",
+            "537.36",
+            "31.56.96.51",
+            "22",
+            "Jan",
+            "2019:03:56:16",
+            "0330",
+            "GET",
+            "image",
+            "61474",
+            "productModel",
+            "200x200",
+            "HTTP",
+            "1.1",
+            "200",
+            "5379",
+            "https",
+            "www",
+            "zanbil",
+            "ir",
+            "m",
+            "filter",
+            "b113",
+            "Mozilla",
+            "5.0",
+            "Linux",
+            "Android",
+            "6.0",
+            "ALE",
+            "L21",
+            "Build",
+            "HuaweiALE",
+            "L21",
+            "AppleWebKit",
+            "537.36",
+            "KHTML",
+            "like",
+            "Gecko",
+            "Chrome",
+            "66.0.3359.158",
+            "Mobile",
+            "Safari",
+            "537.36",
+            "40.77.167.129",
+            "22",
+            "Jan",
+            "2019:03:56:17",
+            "0330",
+            "GET",
+            "image",
+            "14925",
+            "productModel",
+            "100x100",
+            "HTTP",
+            "1.1",
+            "200",
+            "1696",
+            "Mozilla",
+            "5.0",
+            "compatible",
+            "bingbot",
+            "2.0",
+            "http",
+            "www",
+            "bing",
+            "com",
+            "bingbot",
+            "htm",
+            "91.99.72.15",
+            "22",
+            "Jan",
+            "2019:03:56:17",
+            "0330",
+            "GET",
+            "product",
+            "31893",
+            "62100",
+            "D8%B3%D8%B4%D9%88%D8%A7%D8%B1",
+            "D8%AE%D8%A7%D9%86%DA%AF%DB%8C",
+            "D9%BE%D8%B1%D9%86%D8%B3%D9%84%DB%8C",
+            "D9%85%D8%AF%D9%84",
+            "PR257AT",
+            "HTTP",
+            "1.1",
+            "200",
+            "41483",
+            "Mozilla",
+            "5.0",
+            "Windows",
+            "NT",
+            "6.2",
+            "Win64",
+            "x64",
+            "rv",
+            "16.0",
+            "Gecko",
+            "16.0",
+            "Firefox",
+            "16.0",
+        ];
+        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
+        let mut token_stream = tokenizer.token_stream(test_string);
+        array_ref.iter().for_each(|ref_token| {
+            if token_stream.advance() {
+                assert_eq!(&token_stream.token().text, ref_token)
+            } else {
+                panic!()
+            }
+        });
+    }
 }

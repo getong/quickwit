@@ -32,6 +32,7 @@ static VALID_CHAR_IN_NUMBER: Lazy<Regex> = Lazy::new(|| Regex::new("[-%_.:a-zA-Z
 #[derive(Clone)]
 pub struct LogTokenizer;
 
+#[allow(missing_docs)]
 pub struct LogTokenStream<'a> {
     text: &'a str,
     chars: CharIndices<'a>,
@@ -120,7 +121,6 @@ fn get_quickwit_tokenizer_manager() -> TokenizerManager {
 /// Quickwits default tokenizer
 pub static QUICKWIT_TOKENIZER_MANAGER: Lazy<TokenizerManager> =
     Lazy::new(get_quickwit_tokenizer_manager);
-
 
 #[test]
 fn raw_tokenizer_test() {
@@ -305,14 +305,9 @@ mod tests {
     #[test]
     fn log_tokenizer_log_wsa() {
         let test_string = "54.36.149.41 - - [22/Jan/2019:03:56:14 +0330] \"GET /filter/27|13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,27|%DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,p53 HTTP/1.1\" 200 30577 \"-\" \"Mozilla/5.0 (compatible; AhrefsBot/6.1; +http://ahrefs.com/robot/)\" \"-\"
-31.56.96.51 - - [22/Jan/2019:03:56:16 +0330] \"GET /image/60844/productModel/200x200 HTTP/1.1\" 200 5667 \"https://www.zanbil.ir/m/filter/b113\" \"Mozilla/5.0 (Linux; Android 6.0; ALE-L21 Build/HuaweiALE-L21) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.158 Mobile Safari/537.36\" \"-\"
-31.56.96.51 - - [22/Jan/2019:03:56:16 +0330] \"GET /image/61474/productModel/200x200 HTTP/1.1\" 200 5379 \"https://www.zanbil.ir/m/filter/b113\" \"Mozilla/5.0 (Linux; Android 6.0; ALE-L21 Build/HuaweiALE-L21) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.158 Mobile Safari/537.36\" \"-\"
-40.77.167.129 - - [22/Jan/2019:03:56:17 +0330] \"GET /image/14925/productModel/100x100 HTTP/1.1\" 200 1696 \"-\" \"Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)\" \"-\"
-91.99.72.15 - - [22/Jan/2019:03:56:17 +0330] \"GET /product/31893/62100/%D8%B3%D8%B4%D9%88%D8%A7%D8%B1-%D8%AE%D8%A7%D9%86%DA%AF%DB%8C-%D9%BE%D8%B1%D9%86%D8%B3%D9%84%DB%8C-%D9%85%D8%AF%D9%84-PR257AT HTTP/1.1\" 200 41483 \"-\" \"Mozilla/5.0 (Windows NT 6.2; Win64; x64; rv:16.0)Gecko/16.0 Firefox/16.0\" \"-\"";
+31.56.96.51 - - [22/Jan/2019:03:56:16 +0330] \"GET /image/60844/productModel/200x200 HTTP/1.1\" 200 5667 \"https://www.zanbil.ir/m/filter/b113\" \"Mozilla/5.0 (Linux; Android 6.0; ALE-L21 Build/HuaweiALE-L21) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.158 Mobile Safari/537.36\" \"-\"";
 
-        // This was generated obviously
-        // TODO This test is ugly, maybe put it in another file ?
-        let array_ref: [&str; 163] = [
+        let array_ref: [&str; 66] = [
             "54.36.149.41",
             "22",
             "Jan",
@@ -380,103 +375,6 @@ mod tests {
             "Mobile",
             "Safari",
             "537.36",
-            "31.56.96.51",
-            "22",
-            "Jan",
-            "2019:03:56:16",
-            "0330",
-            "GET",
-            "image",
-            "61474",
-            "productModel",
-            "200x200",
-            "HTTP",
-            "1.1",
-            "200",
-            "5379",
-            "https",
-            "www",
-            "zanbil",
-            "ir",
-            "m",
-            "filter",
-            "b113",
-            "Mozilla",
-            "5.0",
-            "Linux",
-            "Android",
-            "6.0",
-            "ALE",
-            "L21",
-            "Build",
-            "HuaweiALE",
-            "L21",
-            "AppleWebKit",
-            "537.36",
-            "KHTML",
-            "like",
-            "Gecko",
-            "Chrome",
-            "66.0.3359.158",
-            "Mobile",
-            "Safari",
-            "537.36",
-            "40.77.167.129",
-            "22",
-            "Jan",
-            "2019:03:56:17",
-            "0330",
-            "GET",
-            "image",
-            "14925",
-            "productModel",
-            "100x100",
-            "HTTP",
-            "1.1",
-            "200",
-            "1696",
-            "Mozilla",
-            "5.0",
-            "compatible",
-            "bingbot",
-            "2.0",
-            "http",
-            "www",
-            "bing",
-            "com",
-            "bingbot",
-            "htm",
-            "91.99.72.15",
-            "22",
-            "Jan",
-            "2019:03:56:17",
-            "0330",
-            "GET",
-            "product",
-            "31893",
-            "62100",
-            "D8%B3%D8%B4%D9%88%D8%A7%D8%B1",
-            "D8%AE%D8%A7%D9%86%DA%AF%DB%8C",
-            "D9%BE%D8%B1%D9%86%D8%B3%D9%84%DB%8C",
-            "D9%85%D8%AF%D9%84",
-            "PR257AT",
-            "HTTP",
-            "1.1",
-            "200",
-            "41483",
-            "Mozilla",
-            "5.0",
-            "Windows",
-            "NT",
-            "6.2",
-            "Win64",
-            "x64",
-            "rv",
-            "16.0",
-            "Gecko",
-            "16.0",
-            "Firefox",
-            "16.0",
         ];
         let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
         let mut token_stream = tokenizer.token_stream(test_string);

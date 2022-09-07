@@ -31,6 +31,7 @@ mod query_builder;
 mod routing_expression;
 mod sort_by;
 // TODO figure out how to use the module in benches without exposing tokenizers
+#[allow(missing_docs)]
 pub mod tokenizers;
 
 /// Pruning tags manipulation.

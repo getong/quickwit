@@ -18,8 +18,7 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use tantivy::tokenizer::{TextAnalyzer, SimpleTokenizer};
-use quickwit_doc_mapper::{DocMapper, tokenizers::LogTokenizer};
+use quickwit_doc_mapper::DocMapper;
 
 const JSON_TEST_DATA: &str = include_str!("data/simple-parse-bench.json");
 
@@ -65,36 +64,5 @@ pub fn simple_json_to_doc_benchmark(c: &mut Criterion) {
     });
 }
 
-// TODO Put this in another source file
-pub fn log_tokenizer_benchmark(c: &mut Criterion) {
-    // compute once and have as static arg ?
-    let mut group = c.benchmark_group("log_tokenizer_benchmark");
-    group.throughput(Throughput::Bytes(JSON_TEST_DATA.len() as u64));
-
-    let log = TextAnalyzer::from(LogTokenizer);
-    let mut log_stream = log.token_stream(JSON_TEST_DATA);
-    let simple = TextAnalyzer::from(SimpleTokenizer);
-    let mut simple_stream = simple.token_stream(JSON_TEST_DATA);
-
-
-    group.bench_function("logs_simple_tokenizer", |b| {
-        b.iter(|| {
-            while simple_stream.advance() {
-                continue;
-            }
-        })
-    });
-
-    group.bench_function("logs_log_tokenizer", |b| {
-        b.iter(|| {
-            while log_stream.advance() {
-                continue;
-            }
-        })
-    });
-
-    group.finish();
-}
-
-criterion_group!(benches, simple_json_to_doc_benchmark, log_tokenizer_benchmark);
+criterion_group!(benches, simple_json_to_doc_benchmark);
 criterion_main!(benches);

@@ -52,8 +52,10 @@ impl Tokenizer for LogTokenizer {
 impl<'a> LogTokenStream<'a> {
     fn search_token_end(&mut self) -> usize {
         (&mut self.chars)
-            // Not splitting on '/' and '-' at all
-            .filter(|&(_, ref c)| *c != '%' && *c != '/' && *c != '-' && !c.is_alphanumeric())
+            // TODO Refactor
+            .filter(|&(_, ref c)| {
+                (*c != '%' && *c != '/' && *c != '-' && *c != '.') && !c.is_alphanumeric()
+            })
             .map(|(offset, _)| offset)
             .next()
             .unwrap_or(self.text.len())
@@ -87,7 +89,7 @@ impl<'a> TokenStream for LogTokenStream<'a> {
                 self.push_token(offset_from, offset_to);
 
                 return true;
-            } else if c.is_alphabetic() {
+            } else if c.is_alphabetic() || c == '/' {
                 let offset_to = self.search_token_end();
                 self.push_token(offset_from, offset_to);
 
@@ -158,7 +160,7 @@ mod tests {
             "02:51",
         ];
 
-        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(test_string);
+        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(numbers);
 
         array_ref.iter().for_each(|ref_token| {
             if token_stream.advance() {
@@ -174,31 +176,8 @@ mod tests {
     #[test]
     fn log_tokenizer_compare_with_simple() {
         let test_string = "this,is,the,test 42 here\n3932\t20dk,3093raopxa'wd";
-        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
-        let ref_tokenizer = TextAnalyzer::from(SimpleTokenizer);
-        let mut token_stream = tokenizer.token_stream(test_string);
-        let mut ref_token_stream = ref_tokenizer.token_stream(test_string);
-
-        while token_stream.advance() && ref_token_stream.advance() {
-            assert_eq!(&token_stream.token().text, &ref_token_stream.token().text);
-        }
-
-        assert!(!(token_stream.advance() || ref_token_stream.advance()));
-    }
-
-    // The tokenizer should still be able to work on normal texts
-    #[test]
-    fn log_tokenizer_basic_text() {
-        let test_string = r#"
-        Aujourd'hui, maman est morte. Ou peut-
-    être hier, je ne sais pas. J'ai reçu un télégramme de l'asile : « Mère décédée. Enterrement demain. Sentiments distingués.»
-    Cela ne veut rien dire. C'était peut-être
-    hier.
-        "#;
-        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
-        let ref_tokenizer = TextAnalyzer::from(SimpleTokenizer);
-        let mut token_stream = tokenizer.token_stream(test_string);
-        let mut ref_token_stream = ref_tokenizer.token_stream(test_string);
+        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(test_string);
+        let mut ref_token_stream = TextAnalyzer::from(SimpleTokenizer).token_stream(test_string);
 
         while token_stream.advance() && ref_token_stream.advance() {
             assert_eq!(&token_stream.token().text, &ref_token_stream.token().text);
@@ -245,7 +224,7 @@ mod tests {
         let test_string = "1331901000.000000    CHEt7z3AzG4gyCNgci    192.168.202.79    50465    \
                            192.168.229.251    80    1    HEAD 192.168.229.251    /DEASLog02.nsf    \
                            -    Mozilla/5.0";
-        let array_ref: [&str; 13] = [
+        let array_ref: [&str; 11] = [
             "1331901000.000000",
             "CHEt7z3AzG4gyCNgci",
             "192.168.202.79",
@@ -299,12 +278,12 @@ mod tests {
     fn log_tokenizer_log_wsa() {
         let test_string = "54.36.149.41 - - [22/Jan/2019:03:56:14 +0330] \"GET /filter/27|13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,27|%DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,p53 HTTP/1.1\" 200 30577 \"-\" \"Mozilla/5.0 (compatible; AhrefsBot/6.1; +http://ahrefs.com/robot/)\" \"-\"";
 
-        let array_ref: [&str; 18] = [
+        let array_ref: [&str; 16] = [
         "54.36.149.41",
         "22/Jan/2019:03:56:14",
         "0330",
         "GET",
-        "filter/27",
+        "/filter/27",
         "13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84",
         "27",
         "DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84",

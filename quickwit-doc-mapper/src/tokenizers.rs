@@ -26,7 +26,7 @@ use tantivy::tokenizer::{
     TokenizerManager,
 };
 
-static VALID_CHAR_IN_NUMBER: Lazy<Regex> = Lazy::new(|| Regex::new("[/-%_.:a-zA-Z]").unwrap());
+static VALID_CHAR_IN_NUMBER: Lazy<Regex> = Lazy::new(|| Regex::new("[-/%_.:a-zA-Z]").unwrap());
 
 /// Tokenize the text without splitting on ".", "-" and "_" in numbers.
 #[derive(Clone)]
@@ -52,7 +52,8 @@ impl Tokenizer for LogTokenizer {
 impl<'a> LogTokenStream<'a> {
     fn search_token_end(&mut self) -> usize {
         (&mut self.chars)
-            .filter(|&(_, ref c)| *c != '%' && !c.is_alphanumeric())
+            // Not splitting on '/' and '-' at all
+            .filter(|&(_, ref c)| *c != '%' && *c != '/' && *c != '-' && !c.is_alphanumeric())
             .map(|(offset, _)| offset)
             .next()
             .unwrap_or(self.text.len())
@@ -148,8 +149,6 @@ mod tests {
     #[test]
     fn log_tokenizer_basic_test() {
         let numbers = "255.255.255.255 test \n\ttest\t 27-05-2022 \t\t  \n \tat\r\n 02:51";
-        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
-        let mut token_stream = tokenizer.token_stream(numbers);
         let array_ref: [&str; 6] = [
             "255.255.255.255",
             "test",
@@ -158,6 +157,8 @@ mod tests {
             "at",
             "02:51",
         ];
+
+        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(test_string);
 
         array_ref.iter().for_each(|ref_token| {
             if token_stream.advance() {
@@ -210,10 +211,8 @@ mod tests {
     fn log_tokenizer_log_test() {
         let test_string = "Dec 10 06:55:48 LabSZ sshd[24200]: Failed password for invalid user \
                            webmaster from 173.234.31.186 port 38926 ssh2";
-        let array_ref: [&str; 17] = [
-            "Dec",
-            "10",
-            "06:55:48",
+        let array_ref: [&str; 15] = [
+            "Dec 10 06:55:48",
             "LabSZ",
             "sshd",
             "24200",
@@ -229,8 +228,8 @@ mod tests {
             "38926",
             "ssh2",
         ];
-        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
-        let mut token_stream = tokenizer.token_stream(test_string);
+
+        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(test_string);
 
         array_ref.iter().for_each(|ref_token| {
             if token_stream.advance() {
@@ -256,13 +255,11 @@ mod tests {
             "1",
             "HEAD",
             "192.168.229.251",
-            "DEASLog02",
-            "nsf",
-            "Mozilla",
-            "5.0",
+            "/DEASLog02.nsf",
+            "Mozilla/5.0",
         ];
-        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
-        let mut token_stream = tokenizer.token_stream(test_string);
+
+        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(test_string);
 
         array_ref.iter().for_each(|ref_token| {
             if token_stream.advance() {
@@ -277,21 +274,17 @@ mod tests {
     fn log_tokenizer_log_test_http() {
         let test_string = "{\"message\" : \"211.11.9.0 - - [1998-06-21T15:00:01-05:00] \"GET \
                            /english/index.html HTTP/1.0\" 304 0\"}";
-        let array_ref: [&str; 11] = [
+        let array_ref: [&str; 8] = [
             "message",
             "211.11.9.0",
             "1998-06-21T15:00:01-05:00",
             "GET",
-            "english",
-            "index",
-            "html",
-            "HTTP",
-            "1.0",
+            "/english/index.html",
+            "HTTP/1.0",
             "304",
             "0",
         ];
-        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
-        let mut token_stream = tokenizer.token_stream(test_string);
+        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(test_string);
 
         array_ref.iter().for_each(|ref_token| {
             if token_stream.advance() {
@@ -304,80 +297,29 @@ mod tests {
 
     #[test]
     fn log_tokenizer_log_wsa() {
-        let test_string = "54.36.149.41 - - [22/Jan/2019:03:56:14 +0330] \"GET /filter/27|13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,27|%DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,p53 HTTP/1.1\" 200 30577 \"-\" \"Mozilla/5.0 (compatible; AhrefsBot/6.1; +http://ahrefs.com/robot/)\" \"-\"
-31.56.96.51 - - [22/Jan/2019:03:56:16 +0330] \"GET /image/60844/productModel/200x200 HTTP/1.1\" 200 5667 \"https://www.zanbil.ir/m/filter/b113\" \"Mozilla/5.0 (Linux; Android 6.0; ALE-L21 Build/HuaweiALE-L21) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.158 Mobile Safari/537.36\" \"-\"";
+        let test_string = "54.36.149.41 - - [22/Jan/2019:03:56:14 +0330] \"GET /filter/27|13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,27|%DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,p53 HTTP/1.1\" 200 30577 \"-\" \"Mozilla/5.0 (compatible; AhrefsBot/6.1; +http://ahrefs.com/robot/)\" \"-\"";
 
-        let array_ref: [&str; 66] = [
-            "54.36.149.41",
-            "22",
-            "Jan",
-            "2019:03:56:14",
-            "0330",
-            "GET",
-            "filter",
-            "27",
-            "13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84",
-            "27",
-            "DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%\
-             B3%D9%84",
-            "p53",
-            "HTTP",
-            "1.1",
-            "200",
-            "30577",
-            "Mozilla",
-            "5.0",
-            "compatible",
-            "AhrefsBot",
-            "6.1",
-            "http",
-            "ahrefs",
-            "com",
-            "robot",
-            "31.56.96.51",
-            "22",
-            "Jan",
-            "2019:03:56:16",
-            "0330",
-            "GET",
-            "image",
-            "60844",
-            "productModel",
-            "200x200",
-            "HTTP",
-            "1.1",
-            "200",
-            "5667",
-            "https",
-            "www",
-            "zanbil",
-            "ir",
-            "m",
-            "filter",
-            "b113",
-            "Mozilla",
-            "5.0",
-            "Linux",
-            "Android",
-            "6.0",
-            "ALE",
-            "L21",
-            "Build",
-            "HuaweiALE",
-            "L21",
-            "AppleWebKit",
-            "537.36",
-            "KHTML",
-            "like",
-            "Gecko",
-            "Chrome",
-            "66.0.3359.158",
-            "Mobile",
-            "Safari",
-            "537.36",
+        let array_ref: [&str; 18] = [
+        "54.36.149.41",
+        "22/Jan/2019:03:56:14",
+        "0330",
+        "GET",
+        "filter/27",
+        "13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84",
+        "27",
+        "DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84",
+        "p53",
+        "HTTP/1.1",
+        "200",
+        "30577",
+        "Mozilla/5.0",
+        "compatible",
+        "AhrefsBot/6.1",
+        "http://ahrefs.com/robot/",
         ];
-        let tokenizer = get_quickwit_tokenizer_manager().get("log").unwrap();
-        let mut token_stream = tokenizer.token_stream(test_string);
+
+        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(test_string);
+
         array_ref.iter().for_each(|ref_token| {
             if token_stream.advance() {
                 assert_eq!(&token_stream.token().text, ref_token)
@@ -385,5 +327,6 @@ mod tests {
                 panic!()
             }
         });
+
     }
 }

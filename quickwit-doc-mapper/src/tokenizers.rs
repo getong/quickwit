@@ -26,7 +26,7 @@ use tantivy::tokenizer::{
     TokenizerManager,
 };
 
-static VALID_CHAR_IN_NUMBER: Lazy<Regex> = Lazy::new(|| Regex::new("[-%_.:a-zA-Z]").unwrap());
+static VALID_CHAR_IN_NUMBER: Lazy<Regex> = Lazy::new(|| Regex::new("[/-%_.:a-zA-Z]").unwrap());
 
 /// Tokenize the text without splitting on ".", "-" and "_" in numbers.
 #[derive(Clone)]

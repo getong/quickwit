@@ -26,6 +26,7 @@ use tantivy::tokenizer::{
     TokenizerManager,
 };
 
+// FIXME don't really need a regex for this, static string should do
 static VALID_CHAR_IN_NUMBER: Lazy<Regex> = Lazy::new(|| Regex::new("[-/%_.:a-zA-Z]").unwrap());
 static DATE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Z|a-z]{1,3}[ \t]*[0-9]{1,2}[ \t]*[0-9]{1,4}[-_/:][0-9]{1,2}[-_/:][0-9]{1,4}").unwrap());
 
@@ -82,11 +83,13 @@ impl<'a> TokenStream for LogTokenStream<'a> {
         self.token.position = self.token.position.wrapping_add(1);
         while let Some((offset_from, c)) = self.chars.next() {
             // Get a string from the offset and check if we can match a date
-            let from_offset = &self.chars[offset_from];
+            let from_offset = &self.text[offset_from..];
+
             // If we match the start of date then we push the entire date fmt as
             // one token
-            if DATE.is_match() {
-
+            let mat = DATE.find(from_offset);
+            if mat != None {
+                self.push_token(offset_from, mat.unwrap().end());
             }
             // if the token starts with a number, it must be handled differently
             else if c.is_numeric() {

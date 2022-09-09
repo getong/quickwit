@@ -27,6 +27,7 @@ use tantivy::tokenizer::{
 };
 
 static VALID_CHAR_IN_NUMBER: Lazy<Regex> = Lazy::new(|| Regex::new("[-/%_.:a-zA-Z]").unwrap());
+static DATE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Z|a-z]{1,3}[ \t]*[0-9]{1,2}[ \t]*[0-9]{1,4}[-_/:][0-9]{1,2}[-_/:][0-9]{1,4}").unwrap());
 
 /// Tokenize the text without splitting on ".", "-" and "_" in numbers.
 #[derive(Clone)]
@@ -51,11 +52,10 @@ impl Tokenizer for LogTokenizer {
 
 impl<'a> LogTokenStream<'a> {
     fn search_token_end(&mut self) -> usize {
+        println!("{}", DATE.is_match("Dec 10 06:55:48"));
         (&mut self.chars)
             // TODO Refactor
-            .filter(|&(_, ref c)| {
-                (*c != '%' && *c != '/' && *c != '-' && *c != '.') && !c.is_alphanumeric()
-            })
+            .filter(|&(_, ref c)| *c != '%' && *c != '/' && *c != '-' && *c != '.' && !c.is_alphanumeric())
             .map(|(offset, _)| offset)
             .next()
             .unwrap_or(self.text.len())
@@ -63,9 +63,7 @@ impl<'a> LogTokenStream<'a> {
 
     fn handle_chars_in_number(&mut self) -> usize {
         (&mut self.chars)
-            .filter(|&(_, ref c)| {
-                !(c.is_alphanumeric() || VALID_CHAR_IN_NUMBER.is_match(&c.to_string()))
-            })
+            .filter(|&(_, ref c)| !(c.is_alphanumeric() || VALID_CHAR_IN_NUMBER.is_match(&c.to_string())))
             .map(|(offset, _)| offset)
             .next()
             .unwrap_or(self.text.len())
@@ -83,8 +81,15 @@ impl<'a> TokenStream for LogTokenStream<'a> {
         self.token.text.clear();
         self.token.position = self.token.position.wrapping_add(1);
         while let Some((offset_from, c)) = self.chars.next() {
+            // Get a string from the offset and check if we can match a date
+            let from_offset = &self.chars[offset_from];
+            // If we match the start of date then we push the entire date fmt as
+            // one token
+            if DATE.is_match() {
+
+            }
             // if the token starts with a number, it must be handled differently
-            if c.is_numeric() {
+            else if c.is_numeric() {
                 let offset_to = self.handle_chars_in_number();
                 self.push_token(offset_from, offset_to);
 

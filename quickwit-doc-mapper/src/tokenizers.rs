@@ -20,15 +20,20 @@
 use std::str::CharIndices;
 
 use once_cell::sync::Lazy;
-use regex::{Regex, Match};
+use regex::Regex;
 use tantivy::tokenizer::{
     BoxTokenStream, RawTokenizer, RemoveLongFilter, TextAnalyzer, Token, TokenStream, Tokenizer,
     TokenizerManager,
 };
 
-// FIXME don't really need a regex for this, static string should do
+// FIXME Not sure if regex needed
 static VALID_CHAR_IN_NUMBER: Lazy<Regex> = Lazy::new(|| Regex::new("[-/%_.:a-zA-Z]").unwrap());
-static DATE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Z|a-z]{1,3}[ \t]*[0-9]{1,2}[ \t]*[0-9]{1,4}[-_/:][0-9]{1,2}[-_/:][0-9]{1,4}").unwrap());
+static DATE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^[A-Z|a-z]{1,3}[ \t]*[0-9]{1,2}[ \t]*[0-9]{1,4}[-_/:][0-9]{1,2}[-_/:][0-9]{1,4}")
+        .unwrap()
+});
+static URL: Lazy<Regex> =
+    Lazy::new(|| Regex::new("^[a-z]+:?/?/?[a-z0-9]+[-_\\./a-z]*\\.[a-z]+[-/a-z._=]+").unwrap());
 
 /// Tokenize the text without splitting on ".", "-" and "_" in numbers.
 #[derive(Clone)]
@@ -55,7 +60,9 @@ impl<'a> LogTokenStream<'a> {
     fn search_token_end(&mut self) -> usize {
         (&mut self.chars)
             // TODO Refactor
-            .filter(|&(_, ref c)| *c != '%' && *c != '/' && *c != '-' && *c != '.' && !c.is_alphanumeric())
+            .filter(|&(_, ref c)| {
+                *c != '%' && *c != '/' && *c != '-' && *c != '.' && !c.is_alphanumeric()
+            })
             .map(|(offset, _)| offset)
             .next()
             .unwrap_or(self.text.len())
@@ -63,16 +70,17 @@ impl<'a> LogTokenStream<'a> {
 
     fn handle_chars_in_number(&mut self) -> usize {
         (&mut self.chars)
-            .filter(|&(_, ref c)| !(c.is_alphanumeric() || VALID_CHAR_IN_NUMBER.is_match(&c.to_string())))
+            .filter(|&(_, ref c)| {
+                !(c.is_alphanumeric() || VALID_CHAR_IN_NUMBER.is_match(&c.to_string()))
+            })
             .map(|(offset, _)| offset)
             .next()
             .unwrap_or(self.text.len())
     }
 
-    fn handle_date(&mut self, mat: Match<'a>) -> usize {
-        let offset_to = mat.end();
+    fn handle_match(&mut self, offset_to: usize) -> usize {
         (&mut self.chars)
-            .filter(|(index, _)|  *index == offset_to)
+            .filter(|(index, _)| *index == offset_to)
             .map(|(offset, _)| offset)
             .next()
             .unwrap_or(self.text.len())
@@ -93,9 +101,19 @@ impl<'a> TokenStream for LogTokenStream<'a> {
             // Get a string from the offset and check if we can match a date
             // If we match the start of date then we push the entire date fmt as
             // one token
-            let mat = DATE.find(&self.text[offset_from..]);
-            if mat != None {
-                let offset_to = self.handle_date(mat.unwrap());
+            let from_offset = &self.text[offset_from..];
+            let mat_date = DATE.find(from_offset);
+            let mat_url = URL.find(from_offset);
+
+            if mat_date != None {
+                let offset_to = self.handle_match(offset_from + mat_date.unwrap().end());
+                self.push_token(offset_from, offset_to);
+
+                return true;
+            }
+            // Try to match url or path
+            else if mat_url != None {
+                let offset_to = self.handle_match(offset_from + mat_url.unwrap().end());
                 self.push_token(offset_from, offset_to);
 
                 return true;
@@ -177,7 +195,10 @@ mod tests {
             "02:51",
         ];
 
-        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(numbers);
+        let mut token_stream = get_quickwit_tokenizer_manager()
+            .get("log")
+            .unwrap()
+            .token_stream(numbers);
 
         array_ref.iter().for_each(|ref_token| {
             if token_stream.advance() {
@@ -193,7 +214,10 @@ mod tests {
     #[test]
     fn log_tokenizer_compare_with_simple() {
         let test_string = "this,is,the,test 42 here\n3932\t20dk,3093raopxa'wd";
-        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(test_string);
+        let mut token_stream = get_quickwit_tokenizer_manager()
+            .get("log")
+            .unwrap()
+            .token_stream(test_string);
         let mut ref_token_stream = TextAnalyzer::from(SimpleTokenizer).token_stream(test_string);
 
         while token_stream.advance() && ref_token_stream.advance() {
@@ -225,7 +249,10 @@ mod tests {
             "ssh2",
         ];
 
-        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(test_string);
+        let mut token_stream = get_quickwit_tokenizer_manager()
+            .get("log")
+            .unwrap()
+            .token_stream(test_string);
 
         array_ref.iter().for_each(|ref_token| {
             if token_stream.advance() {
@@ -255,7 +282,10 @@ mod tests {
             "Mozilla/5.0",
         ];
 
-        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(test_string);
+        let mut token_stream = get_quickwit_tokenizer_manager()
+            .get("log")
+            .unwrap()
+            .token_stream(test_string);
 
         array_ref.iter().for_each(|ref_token| {
             if token_stream.advance() {
@@ -280,7 +310,10 @@ mod tests {
             "304",
             "0",
         ];
-        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(test_string);
+        let mut token_stream = get_quickwit_tokenizer_manager()
+            .get("log")
+            .unwrap()
+            .token_stream(test_string);
 
         array_ref.iter().for_each(|ref_token| {
             if token_stream.advance() {
@@ -296,25 +329,29 @@ mod tests {
         let test_string = "54.36.149.41 - - [22/Jan/2019:03:56:14 +0330] \"GET /filter/27|13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,27|%DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,p53 HTTP/1.1\" 200 30577 \"-\" \"Mozilla/5.0 (compatible; AhrefsBot/6.1; +http://ahrefs.com/robot/)\" \"-\"";
 
         let array_ref: [&str; 16] = [
-        "54.36.149.41",
-        "22/Jan/2019:03:56:14",
-        "0330",
-        "GET",
-        "/filter/27",
-        "13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84",
-        "27",
-        "DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84",
-        "p53",
-        "HTTP/1.1",
-        "200",
-        "30577",
-        "Mozilla/5.0",
-        "compatible",
-        "AhrefsBot/6.1",
-        "http://ahrefs.com/robot/",
+            "54.36.149.41",
+            "22/Jan/2019:03:56:14",
+            "0330",
+            "GET",
+            "/filter/27",
+            "13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84",
+            "27",
+            "DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%\
+             B3%D9%84",
+            "p53",
+            "HTTP/1.1",
+            "200",
+            "30577",
+            "Mozilla/5.0",
+            "compatible",
+            "AhrefsBot/6.1",
+            "http://ahrefs.com/robot/",
         ];
 
-        let mut token_stream = get_quickwit_tokenizer_manager().get("log").unwrap().token_stream(test_string);
+        let mut token_stream = get_quickwit_tokenizer_manager()
+            .get("log")
+            .unwrap()
+            .token_stream(test_string);
 
         array_ref.iter().for_each(|ref_token| {
             if token_stream.advance() {
@@ -323,6 +360,5 @@ mod tests {
                 panic!()
             }
         });
-
     }
 }

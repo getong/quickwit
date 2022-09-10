@@ -53,7 +53,6 @@ impl Tokenizer for LogTokenizer {
 
 impl<'a> LogTokenStream<'a> {
     fn search_token_end(&mut self) -> usize {
-        println!("{}", DATE.is_match("Dec 10 06:55:48"));
         (&mut self.chars)
             // TODO Refactor
             .filter(|&(_, ref c)| *c != '%' && *c != '/' && *c != '-' && *c != '.' && !c.is_alphanumeric())
@@ -85,11 +84,16 @@ impl<'a> TokenStream for LogTokenStream<'a> {
             // Get a string from the offset and check if we can match a date
             let from_offset = &self.text[offset_from..];
 
+            // TODO refactor
             // If we match the start of date then we push the entire date fmt as
             // one token
             let mat = DATE.find(from_offset);
             if mat != None {
-                self.push_token(offset_from, mat.unwrap().end());
+                let offset_to = mat.unwrap().end();
+                self.push_token(offset_from, offset_to);
+                (&mut self.chars).filter(|(index, _)|  *index == offset_to).map(|(offset, _)| offset).next();
+
+                return true;
             }
             // if the token starts with a number, it must be handled differently
             else if c.is_numeric() {

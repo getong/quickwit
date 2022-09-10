@@ -20,7 +20,7 @@
 use std::str::CharIndices;
 
 use once_cell::sync::Lazy;
-use regex::Regex;
+use regex::{Regex, Match};
 use tantivy::tokenizer::{
     BoxTokenStream, RawTokenizer, RemoveLongFilter, TextAnalyzer, Token, TokenStream, Tokenizer,
     TokenizerManager,
@@ -69,6 +69,15 @@ impl<'a> LogTokenStream<'a> {
             .unwrap_or(self.text.len())
     }
 
+    fn handle_date(&mut self, mat: Match<'a>) -> usize {
+        let offset_to = mat.end();
+        (&mut self.chars)
+            .filter(|(index, _)|  *index == offset_to)
+            .map(|(offset, _)| offset)
+            .next()
+            .unwrap_or(self.text.len())
+    }
+
     fn push_token(&mut self, offset_from: usize, offset_to: usize) {
         self.token.offset_from = offset_from;
         self.token.offset_to = offset_to;
@@ -82,16 +91,12 @@ impl<'a> TokenStream for LogTokenStream<'a> {
         self.token.position = self.token.position.wrapping_add(1);
         while let Some((offset_from, c)) = self.chars.next() {
             // Get a string from the offset and check if we can match a date
-            let from_offset = &self.text[offset_from..];
-
-            // TODO refactor
             // If we match the start of date then we push the entire date fmt as
             // one token
-            let mat = DATE.find(from_offset);
+            let mat = DATE.find(&self.text[offset_from..]);
             if mat != None {
-                let offset_to = mat.unwrap().end();
+                let offset_to = self.handle_date(mat.unwrap());
                 self.push_token(offset_from, offset_to);
-                (&mut self.chars).filter(|(index, _)|  *index == offset_to).map(|(offset, _)| offset).next();
 
                 return true;
             }

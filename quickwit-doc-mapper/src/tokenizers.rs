@@ -26,16 +26,16 @@ use tantivy::tokenizer::{
     TokenizerManager,
 };
 
-// FIXME Not sure if regex needed
-static VALID_CHAR_IN_NUMBER: Lazy<Regex> = Lazy::new(|| Regex::new("[-/%_.:a-zA-Z]").unwrap());
-static DATE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^[A-Z|a-z]{1,3}[ \t]*[0-9]{1,2}[ \t]*[0-9]{1,4}[-_/:][0-9]{1,2}[-_/:][0-9]{1,4}")
-        .unwrap()
-});
-static URL: Lazy<Regex> =
-    Lazy::new(|| Regex::new("^[a-z]+:?/?/?[a-z0-9]+[-_\\./a-z]*\\.[a-z]+[-/a-z._=]+").unwrap());
 
-/// Tokenize the text without splitting on ".", "-" and "_" in numbers.
+static NUMBER_REGEX: usize = 2;
+static REGEX_ARRAY: [Lazy<Regex>; 3] =
+    [
+        Lazy::new(|| Regex::new("^[a-z]+:?/?/?[a-z0-9]+[-_\\./a-z]*\\.[a-z]+[-/a-z._=]+").unwrap()),
+        Lazy::new(|| Regex::new("^[A-Za-z]{1,3}[ \t]{1,2}[0-9]{1,2}[ \t]{1,2}[0-9]{1,4}[-_/:][0-9]{1,2}[-_/:][0-9]{1,4}").unwrap()),
+        Lazy::new(|| Regex::new("^[0-9][-/%_\\.:a-zA-Z0-9]*").unwrap())
+    ];
+
+/// Log friendly Tokenizer that avoids splittings on IPs, dates, URLs and IDs
 #[derive(Clone)]
 pub struct LogTokenizer;
 
@@ -61,17 +61,8 @@ impl<'a> LogTokenStream<'a> {
         (&mut self.chars)
             // TODO Refactor
             .filter(|&(_, ref c)| {
+                // Characters we probably don't want to split on aside from alphanumeric
                 *c != '%' && *c != '/' && *c != '-' && *c != '.' && !c.is_alphanumeric()
-            })
-            .map(|(offset, _)| offset)
-            .next()
-            .unwrap_or(self.text.len())
-    }
-
-    fn handle_chars_in_number(&mut self) -> usize {
-        (&mut self.chars)
-            .filter(|&(_, ref c)| {
-                !(c.is_alphanumeric() || VALID_CHAR_IN_NUMBER.is_match(&c.to_string()))
             })
             .map(|(offset, _)| offset)
             .next()
@@ -97,34 +88,22 @@ impl<'a> TokenStream for LogTokenStream<'a> {
     fn advance(&mut self) -> bool {
         self.token.text.clear();
         self.token.position = self.token.position.wrapping_add(1);
+
+        // TODO Replace iterator with index maybe ?
         while let Some((offset_from, c)) = self.chars.next() {
-            // Get a string from the offset and check if we can match a date
-            // If we match the start of date then we push the entire date fmt as
-            // one token
-            let from_offset = &self.text[offset_from..];
-            let mat_date = DATE.find(from_offset);
-            let mat_url = URL.find(from_offset);
+            let text_substring = &self.text[offset_from..];
 
-            if mat_date != None {
-                let offset_to = self.handle_match(offset_from + mat_date.unwrap().end());
-                self.push_token(offset_from, offset_to);
+            for regex in &REGEX_ARRAY {
+                if let Some(regex_match) = regex.find(text_substring) {
+                    let offset_to = self.handle_match(offset_from + regex_match.end());
+                    self.push_token(offset_from, offset_to);
 
-                return true;
+                    return true;
+                }
             }
-            // Try to match url or path
-            else if mat_url != None {
-                let offset_to = self.handle_match(offset_from + mat_url.unwrap().end());
-                self.push_token(offset_from, offset_to);
 
-                return true;
-            }
-            // if the token starts with a number, it must be handled differently
-            else if c.is_numeric() {
-                let offset_to = self.handle_chars_in_number();
-                self.push_token(offset_from, offset_to);
-
-                return true;
-            } else if c.is_alphabetic() || c == '/' {
+            // Catch all condition
+            if c.is_alphabetic() || c == '/' {
                 let offset_to = self.search_token_end();
                 self.push_token(offset_from, offset_to);
 

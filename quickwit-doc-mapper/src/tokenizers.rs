@@ -26,13 +26,17 @@ use tantivy::tokenizer::{
     TokenizerManager,
 };
 
-
-static REGEX_ARRAY: [Lazy<Regex>; 3] =
-    [
-        Lazy::new(|| Regex::new("^[a-z]+:?/?/?[a-z0-9]+[-_\\./a-z]*\\.[a-z]+[-/a-z._=]+").unwrap()),
-        Lazy::new(|| Regex::new("^[A-Za-z]{1,3}[ \t]{1,2}[0-9]{1,2}[ \t]{1,2}[0-9]{1,4}[-_/:][0-9]{1,2}[-_/:][0-9]{1,4}").unwrap()),
-        Lazy::new(|| Regex::new("^[0-9][-/%_\\.:a-zA-Z0-9]*").unwrap())
-    ];
+static REGEX_ARRAY: [Lazy<Regex>; 3] = [
+    Lazy::new(|| Regex::new("^[a-z]+:?/?/?[a-z0-9]+[-_\\./a-z]*\\.[a-z]+[-/a-z._=]+").unwrap()),
+    Lazy::new(|| {
+        Regex::new(
+            "^[A-Za-z]{1,3}[ \t]{1,2}[0-9]{1,2}[ \
+             \t]{1,2}[0-9]{1,4}[-_/:][0-9]{1,2}[-_/:][0-9]{1,4}",
+        )
+        .unwrap()
+    }),
+    Lazy::new(|| Regex::new("^[0-9][-/%_\\.:a-zA-Z0-9]*").unwrap()),
+];
 static VALID_CHARS: &str = "%/-.";
 
 /// Log friendly Tokenizer that avoids splittings on IPs, dates, URLs and IDs

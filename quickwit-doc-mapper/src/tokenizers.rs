@@ -26,17 +26,21 @@ use tantivy::tokenizer::{
     TokenizerManager,
 };
 
-static REGEX_ARRAY: [Lazy<Regex>; 3] = [
-    Lazy::new(|| Regex::new("^[a-z]+:?/?/?[a-z0-9]+[-_\\./a-z]*\\.[a-z]+[-/a-z._=]+").unwrap()),
-    Lazy::new(|| {
+static REGEX_ARRAY: Lazy<[Regex; 3]> = Lazy::new(|| {
+    [
+        // URL regex to match http(s) links or www links
+        Regex::new("^[a-z]+:?/?/?[a-z0-9]+[-_\\./a-z]*\\.[a-z]+[-/a-z._=]+").unwrap(),
+        // Date regex to match dates similar to this example "Dec 10 06:55:48",
         Regex::new(
             "^[A-Za-z]{1,3}[ \t]{1,2}[0-9]{1,2}[ \
              \t]{1,2}[0-9]{1,4}[-_/:][0-9]{1,2}[-_/:][0-9]{1,4}",
-        )
-        .unwrap()
-    }),
-    Lazy::new(|| Regex::new("^[0-9][-/%_\\.:a-zA-Z0-9]*").unwrap()),
-];
+             )
+            .unwrap(),
+        // Regex to match numbers or numbers with certain chars (e.g IP addresses)
+        Regex::new("^[0-9][-/%_\\.:a-zA-Z0-9]*").unwrap()
+    ]
+});
+
 static VALID_CHARS: &str = "%/-.";
 
 /// Log friendly Tokenizer that avoids splittings on IPs, dates, URLs and IDs
@@ -94,7 +98,7 @@ impl<'a> TokenStream for LogTokenStream<'a> {
         while let Some((offset_from, c)) = self.chars.next() {
             let text_substring = &self.text[offset_from..];
 
-            for regex in &REGEX_ARRAY {
+            for regex in REGEX_ARRAY.iter() {
                 if let Some(regex_match) = regex.find(text_substring) {
                     let offset_to = self.handle_match(offset_from + regex_match.end());
                     self.push_token(offset_from, offset_to);
@@ -103,7 +107,8 @@ impl<'a> TokenStream for LogTokenStream<'a> {
                 }
             }
 
-            // Catch all condition
+            // Catch all condition for words and '/' in case we stumble upon a
+            // filesystem path or endpoints
             if c.is_alphabetic() || c == '/' {
                 let offset_to = self.search_token_end();
                 self.push_token(offset_from, offset_to);

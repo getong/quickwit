@@ -29,21 +29,24 @@ use tantivy::tokenizer::{
 static REGEX_ARRAY: Lazy<[Regex; 3]> = Lazy::new(|| {
     [
         // URL regex to match http(s) links or www links
-        Regex::new("^[a-z]+:?/?/?[a-z0-9]+[-_\\./a-z]*\\.[a-z]+[-/a-z._=]+").unwrap(),
+        Regex::new("^[a-z]+:?/?/?[a-z0-9]+[-_\\./a-z]*\\.[a-z]+[-/a-z._=]+").expect("Failed to compile regular expression. This should never happen! Please, report on https://github.com/quickwit-oss/quickwit/issues."),
+
         // Date regex to match dates similar to this example "Dec 10 06:55:48",
         Regex::new(
             "^[A-Za-z]{1,3}[ \t]{1,2}[0-9]{1,2}[ \
              \t]{1,2}[0-9]{1,4}[-_/:][0-9]{1,2}[-_/:][0-9]{1,4}",
              )
-            .unwrap(),
+            .expect("Failed to compile regular expression. This should never happen! Please, report on https://github.com/quickwit-oss/quickwit/issues."),
+
         // Regex to match numbers or numbers with certain chars (e.g IP addresses)
-        Regex::new("^[0-9][-/%_\\.:a-zA-Z0-9]*").unwrap()
+        Regex::new("^[0-9][-/%_\\.:a-zA-Z0-9]*").expect("Failed to compile regular expression. This should never happen! Please, report on https://github.com/quickwit-oss/quickwit/issues.")
     ]
 });
 
-static VALID_CHARS: &str = "%/-.";
+static VALID_CHARS: &str = ".-/:%";
 
-/// Log friendly Tokenizer that avoids splittings on IPs, dates, URLs and IDs
+/// Log friendly Tokenizer that avoids splittings on ponctuation in:
+///     - IP addresses (both ipv4 and ipv6)
 #[derive(Clone)]
 pub struct LogTokenizer;
 
@@ -65,9 +68,9 @@ impl Tokenizer for LogTokenizer {
 }
 
 impl<'a> LogTokenStream<'a> {
+    // Characters we probably don't want to split on aside from alphanumeric
     fn search_token_end(&mut self) -> usize {
         (&mut self.chars)
-            // Characters we probably don't want to split on aside from alphanumeric
             .filter(|&(_, ref c)| !VALID_CHARS.contains(*c) && !c.is_alphanumeric())
             .map(|(offset, _)| offset)
             .next()
@@ -310,6 +313,35 @@ mod tests {
     }
 
     #[test]
+    fn log_tokenizer_ip_test() {
+        let test_string = r"255.255.255.255
+            0f31:e019:5e74:6679:3134:99f1:8f55:fa2a
+            e6c5:5182:b404:7e64:d91f:ba40:bfb7:c184
+            12.32.75.221
+            ";
+
+        let array_ref: [&str; 4] = [
+            "255.255.255.255",
+            "0f31:e019:5e74:6679:3134:99f1:8f55:fa2a",
+            "e6c5:5182:b404:7e64:d91f:ba40:bfb7:c184",
+            "12.32.75.221"
+        ];
+
+        let mut token_stream = get_quickwit_tokenizer_manager()
+            .get("log")
+            .unwrap()
+            .token_stream(test_string);
+
+        array_ref.iter().for_each(|ref_token| {
+            if token_stream.advance() {
+                assert_eq!(&token_stream.token().text, ref_token)
+            } else {
+                panic!()
+            }
+        });
+    }
+
+    #[test]
     fn log_tokenizer_log_wsa() {
         let test_string = "54.36.149.41 - - [22/Jan/2019:03:56:14 +0330] \"GET /filter/27|13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,27|%DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84,p53 HTTP/1.1\" 200 30577 \"-\" \"Mozilla/5.0 (compatible; AhrefsBot/6.1; +http://ahrefs.com/robot/)\" \"-\"";
 
@@ -322,15 +354,15 @@ mod tests {
             "13%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%B3%D9%84",
             "27",
             "DA%A9%D9%85%D8%AA%D8%B1%20%D8%A7%D8%B2%205%20%D9%85%DA%AF%D8%A7%D9%BE%DB%8C%DA%A9%D8%\
-             B3%D9%84",
-            "p53",
-            "HTTP/1.1",
-            "200",
-            "30577",
-            "Mozilla/5.0",
-            "compatible",
-            "AhrefsBot/6.1",
-            "http://ahrefs.com/robot/",
+                B3%D9%84",
+                "p53",
+                "HTTP/1.1",
+                "200",
+                "30577",
+                "Mozilla/5.0",
+                "compatible",
+                "AhrefsBot/6.1",
+                "http://ahrefs.com/robot/",
         ];
 
         let mut token_stream = get_quickwit_tokenizer_manager()

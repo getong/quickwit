@@ -170,8 +170,9 @@ mod tests {
         a strong wind is coming
         sand in my face
         "#;
-        let my_long_text = "a text, that is just too long, no one will type it, no one will like it, \
-                        no one shall find it. I just need some more chars, now you may not pass.";
+        let my_long_text = "a text, that is just too long, no one will type it, no one will like \
+                            it, no one shall find it. I just need some more chars, now you may \
+                            not pass.";
 
         let tokenizer = get_quickwit_tokenizer_manager().get("raw").unwrap();
         let mut haiku_stream = tokenizer.token_stream(my_haiku);
@@ -195,7 +196,6 @@ mod tests {
             }
         });
     }
-
 
     #[test]
     fn log_tokenizer_basic_test() {
@@ -332,7 +332,7 @@ mod tests {
             "255.255.255.255",
             "0f31:e019:5e74:6679:3134:99f1:8f55:fa2a",
             "e6c5:5182:b404:7e64:d91f:ba40:bfb7:c184",
-            "12.32.75.221"
+            "12.32.75.221",
         ];
 
         log_tokenizer_test_helper(test_string, &array_ref)

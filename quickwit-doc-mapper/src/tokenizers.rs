@@ -26,35 +26,45 @@ use tantivy::tokenizer::{
     TokenizerManager,
 };
 
-// The array is ordered according to how often we'd stumble upon the expression
+static REGEX_ERROR_MSG: &str = "Failed to compile regular expression. This should never happen! Please, report on https://github.com/quickwit-oss/quickwit/issues.";
+
+// The array is ordered according to how often we'd stumble upon the expression.
+// If an expression is bound to appear a lot, it should be at the smallest index possible
+// to avoid iterating through the array as much as possible.
 static REGEX_ARRAY: Lazy<[Regex; 4]> = Lazy::new(|| {
     [
-        // Regex to match numbers or numbers with certain characters that should not be split on (e.g IP addresses)
-        Regex::new("^[0-9][-/%_\\.:a-zA-Z0-9]*")
-            .expect("Failed to compile regular expression. This should never happen! Please, report on https://github.com/quickwit-oss/quickwit/issues."),
-
-        // Date regex to match dates similar to this example "Dec 10 06:55:48",
-        Regex::new(
-            "^[A-Za-z]{1,3}[ \t]{1,2}[0-9]{1,2}[ \t]{1,2}[-_/:0-9]+",
-             )
-            .expect("Failed to compile regular expression. This should never happen! Please, report on https://github.com/quickwit-oss/quickwit/issues."),
-
-        // Regex to match filesystem paths or endpoints
-        Regex::new("^/?[-a-zA-Z0-9./:%_]+[a-zA-Z0-9]+/?")
-            .expect("Failed to compile regular expression. This should never happen! Please, report on https://github.com/quickwit-oss/quickwit/issues."),
-
-        // URL regex to match http(s) or www links
-        Regex::new("^[a-z]+:?/?/?[a-z0-9]+[-_\\./a-z]*\\.[a-z]+[-/a-z._=]+")
-            .expect("Failed to compile regular expression. This should never happen! Please, report on https://github.com/quickwit-oss/quickwit/issues."),
+        // Regex to match numbers or numbers with certain characters that should not be split on
+        // (e.g IP addresses)
+        Regex::new("^[0-9][-/%_\\.:a-zA-Z0-9]*").expect(REGEX_ERROR_MSG),
+        // Date regex to match dates similar to "MMM d" and potentially followed by "yyyy" or a
+        // time format.
+        Regex::new("^[A-Za-z]{1,3}[ \t]{1,2}[0-9]{1,2}([ \t]{1,2}[0-9]+[-_/:0-9]*)?")
+            .expect(REGEX_ERROR_MSG),
+        // URL regex to match http, https or relative URL
+        // The regex is build to match:
+        //      Protocol followed by a domain name and domain extension and finally
+        //      the path and query if any
+        Regex::new("^(https?://)?[a-z0-9][-\\.a-z0-9]*\\.[\\.a-z]+(/[-&\\?a-z.=]*)*")
+            .expect(REGEX_ERROR_MSG),
+        // Regex to match unix filesystem paths or endpoints of an HTTP request.
+        Regex::new("^/?[-a-zA-Z0-9./:%_]+[a-zA-Z0-9]+/?").expect(REGEX_ERROR_MSG),
     ]
 });
 
 /// Log friendly Tokenizer that avoids splittings on ponctuation in:
 ///     - IP addresses (both ipv4 and ipv6)
-///     - Date formats (ISO 8601, "MMM d yyyy" etc...)
-///     - Common characters found in identifiers (".", "-", etc...)
+///     - Common characters found in identifiers (".", "-", alphanumeric characters etc...)
+///     - Date-time formats (some examples):
+///         - ISO 8601
+///         - Any combination of d, m and y seperated by '.', '-', ':', '_' and '/'
+///         - Any combination of h, m and s seperated by '.', '-', ':', '_' and '/'
+///         - MMM d yyyy
+///     - URLs such as http and https
 ///
-/// The tokenizer still works in full text cases such as log messages
+/// The tokenizer still works in full text cases such as log messages.
+///
+/// The Log tokenizer is registered in quickwit's token manager and can be obtained
+/// with the key "log".
 #[derive(Clone)]
 pub struct LogTokenizer;
 
@@ -101,11 +111,13 @@ impl<'a> TokenStream for LogTokenStream<'a> {
         self.token.position = self.token.position.wrapping_add(1);
 
         // TODO Replace iterator with index maybe ?
-        while let Some((offset_from, c)) = self.chars.next() {
+        while let Some((offset_from, current_character)) = self.chars.next() {
             let text_substring = &self.text[offset_from..];
 
             // First, try to find a pattern where splitting on ponctuation isn't ideal from
-            // the array of expressions
+            // the array of expressions.
+            // If found, advance the iterator to the start of the next token and push
+            // the token in the stream.
             for regex in REGEX_ARRAY.iter() {
                 if let Some(regex_match) = regex.find(text_substring) {
                     let offset_to = self.handle_match(offset_from + regex_match.end());
@@ -117,11 +129,11 @@ impl<'a> TokenStream for LogTokenStream<'a> {
 
             // This case is when we don't have a regex match so the default behaviour
             // is needed.
-            // Either 'c' is alphabetic and should be tokenized accordingly, or
+            // Either the current character is alphabetic and should be tokenized accordingly, or
             // it is a ponctuation character and should be ignored
-            // ('c' cannot be a digit at this point since it would have been matched
-            // by an expression in the array above)
-            if c.is_alphabetic() {
+            // (The current character cannot be a digit at this point since it would have been
+            // matched by an expression in the array above)
+            if current_character.is_alphabetic() {
                 let offset_to = self.search_token_end();
                 self.push_token(offset_from, offset_to);
 
@@ -199,17 +211,19 @@ mod tests {
 
     #[test]
     fn log_tokenizer_basic_test() {
-        let numbers = "255.255.255.255 test \n\ttest\t 27-05-2022 \t\t  \n \tat\r\n 02:51";
-        let array_ref: [&str; 6] = [
+        let test_string =
+            "255.255.255.255 test \n\ttest\t 27-05-2022 \t\t  \n \tat\r\n 02:51\n\nJul 10 -";
+        let array_ref: [&str; 7] = [
             "255.255.255.255",
             "test",
             "test",
             "27-05-2022",
             "at",
             "02:51",
+            "Jul 10",
         ];
 
-        log_tokenizer_test_helper(numbers, &array_ref)
+        log_tokenizer_test_helper(test_string, &array_ref)
     }
 
     // The only difference with the default tantivy is within numbers, this test is
@@ -344,7 +358,7 @@ mod tests {
             /endpoint/index.html
             /bin/sh src/bin/ test_files.cc 
 
-            peut-etre.out";
+            peut-etre.out ";
 
         let array_ref: [&str; 6] = [
             "./quickwit/quickwit-doc-mapper/src/tokenizers.rs",
@@ -375,6 +389,25 @@ mod tests {
             "compatible",
             "AhrefsBot/6.1",
             "http://ahrefs.com/robot/",
+        ];
+
+        log_tokenizer_test_helper(test_string, &array_ref)
+    }
+
+    #[test]
+    fn log_tokenizer_links_test() {
+        let test_string = r"
+        www.google.com
+        https://stackoverflow.com/
+        https://quickwit.io/docs/get-started/installation
+        http://www.domain.com/url?variable=value&variable=value
+        ";
+
+        let array_ref: [&str; 4] = [
+            "www.google.com",
+            "https://stackoverflow.com/",
+            "https://quickwit.io/docs/get-started/installation",
+            "http://www.domain.com/url?variable=value&variable=value",
         ];
 
         log_tokenizer_test_helper(test_string, &array_ref)

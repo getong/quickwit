@@ -44,7 +44,7 @@ static REGEX_ARRAY: Lazy<[Regex; 4]> = Lazy::new(|| {
         // The regex is build to match:
         //      Protocol followed by a domain name and domain extension and finally
         //      the path and query if any
-        Regex::new("^(https?://)?[a-z0-9][-\\.a-z0-9]*\\.[\\.a-z]+(/[-&\\?a-z.=]*)*")
+        Regex::new("^(https?://)?[a-z0-9][-\\.a-z0-9]*\\.[\\.a-z]+(/[-a-z]*)*")
             .expect(REGEX_ERROR_MSG),
         // Regex to match unix filesystem paths or endpoints of an HTTP request.
         Regex::new("^/?[-a-zA-Z0-9./:%_]+[a-zA-Z0-9]+/?").expect(REGEX_ERROR_MSG),
@@ -403,11 +403,15 @@ mod tests {
         http://www.domain.com/url?variable=value&variable=value
         ";
 
-        let array_ref: [&str; 4] = [
+        let array_ref: [&str; 8] = [
             "www.google.com",
             "https://stackoverflow.com/",
             "https://quickwit.io/docs/get-started/installation",
-            "http://www.domain.com/url?variable=value&variable=value",
+            "http://www.domain.com/url",
+            "variable",
+            "value",
+            "variable",
+            "value",
         ];
 
         log_tokenizer_test_helper(test_string, &array_ref)

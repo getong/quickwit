@@ -32,10 +32,13 @@ pub fn log_tokenizer_benchmark(c: &mut Criterion) {
     let simple = TextAnalyzer::from(SimpleTokenizer);
     let mut simple_stream = simple.token_stream(LOG_TEST_DATA);
 
+    let mut simple_tokenizer_tokens = 0;
+    let mut log_tokenizer_tokens = 0;
+
     group.bench_function("logs_simple_tokenizer", |b| {
         b.iter(|| {
             while simple_stream.advance() {
-                continue;
+                simple_tokenizer_tokens += 1;
             }
         })
     });
@@ -43,10 +46,12 @@ pub fn log_tokenizer_benchmark(c: &mut Criterion) {
     group.bench_function("logs_log_tokenizer", |b| {
         b.iter(|| {
             while log_stream.advance() {
-                continue;
+                log_tokenizer_tokens += 1;
             }
         })
     });
+
+    assert_ne!(simple_tokenizer_tokens, log_tokenizer_tokens);
 }
 
 criterion_group!(benches, log_tokenizer_benchmark);

@@ -31,23 +31,24 @@ static REGEX_ERROR_MSG: &str = "Failed to compile regular expression. This shoul
 // The array is ordered according to how often we'd stumble upon the expression.
 // If an expression is bound to appear a lot, it should be at the smallest index possible
 // to avoid iterating through the array as much as possible.
-static REGEX_ARRAY: Lazy<[Regex; 4]> = Lazy::new(|| {
+static REGEX_ARRAY: Lazy<[Regex; 3]> = Lazy::new(|| {
     [
         // Regex to match numbers or numbers with certain characters that should not be split on
         // (e.g IP addresses)
         Regex::new("^[0-9][-/%_\\.:a-zA-Z0-9]*").expect(REGEX_ERROR_MSG),
         // Date regex to match dates similar to "MMM d" and potentially followed by "yyyy" or a
         // time format.
-        Regex::new("^[A-Za-z]{1,3}[ \t]{1,2}[0-9]{1,2}([ \t]{1,2}[0-9]+[-_/:0-9]*)?")
+        Regex::new("^[A-Za-z]{1,3}[ ]{1,2}[0-9]{1,2}([ ]{1,2}[0-9]+[-_/:0-9]*)?")
             .expect(REGEX_ERROR_MSG),
-        // URL regex to match http, https or relative URL
-        // The regex is build to match:
+        // Regex to match URI (URLs for example, http and https), Unix filesystem paths
+        // or identifiers
+        // If matching an URI, the regex is build to match:
         //      Protocol followed by a domain name and domain extension and finally
         //      the path and query if any
-        Regex::new("^(https?://)?[a-z0-9][-\\.a-z0-9]*\\.[\\.a-z]+(/[-a-z]*)*")
-            .expect(REGEX_ERROR_MSG),
-        // Regex to match unix filesystem paths or endpoints of an HTTP request.
-        Regex::new("^/?[-a-zA-Z0-9./:%_]+[a-zA-Z0-9]+/?").expect(REGEX_ERROR_MSG),
+        // If matching a path, accepts relative or absolute paths
+        // If matching identifiers, matches any sequences of alphanumeric characters
+        // separated by '-', '_', ':', '%' or '/'
+        Regex::new("^(https?://|\\.?/)?[-a-zA-Z0-9\\./:%_]+[a-zA-Z0-9]+/?").expect(REGEX_ERROR_MSG),
     ]
 });
 
@@ -59,7 +60,7 @@ static REGEX_ARRAY: Lazy<[Regex; 4]> = Lazy::new(|| {
 ///         - Any combination of d, m and y seperated by '.', '-', ':', '_' and '/'
 ///         - Any combination of h, m and s seperated by '.', '-', ':', '_' and '/'
 ///         - MMM d yyyy
-///     - URLs such as http and https
+///     - URIs such as http and https
 ///
 /// The tokenizer still works in full text cases such as log messages.
 ///
@@ -131,9 +132,10 @@ impl<'a> TokenStream for LogTokenStream<'a> {
             // is needed.
             // Either the current character is alphabetic and should be tokenized accordingly, or
             // it is a ponctuation character and should be ignored
-            // (The current character cannot be a digit at this point since it would have been
-            // matched by an expression in the array above)
-            if current_character.is_alphabetic() {
+            // (The current character shouldn't be a digit at this point since it would have been
+            // matched by an expression in the array above but just in case, expects
+            // alphanumeric characters)
+            if current_character.is_alphanumeric() {
                 let offset_to = self.search_token_end();
                 self.push_token(offset_from, offset_to);
 
@@ -358,14 +360,17 @@ mod tests {
             /endpoint/index.html
             /bin/sh src/bin/ test_files.cc 
 
+            .././folder/_trying-stuff_out.cc  
+
             peut-etre.out ";
 
-        let array_ref: [&str; 6] = [
+        let array_ref: [&str; 7] = [
             "./quickwit/quickwit-doc-mapper/src/tokenizers.rs",
             "/endpoint/index.html",
             "/bin/sh",
             "src/bin/",
             "test_files.cc",
+            ".././folder/_trying-stuff_out.cc",
             "peut-etre.out",
         ];
 

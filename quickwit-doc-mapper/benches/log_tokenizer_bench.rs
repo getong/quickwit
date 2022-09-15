@@ -27,31 +27,31 @@ pub fn log_tokenizer_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("log_tokenizer_benchmark");
     group.throughput(Throughput::Bytes(LOG_TEST_DATA.len() as u64));
 
-    let log = TextAnalyzer::from(LogTokenizer);
-    let mut log_stream = log.token_stream(LOG_TEST_DATA);
-    let simple = TextAnalyzer::from(SimpleTokenizer);
-    let mut simple_stream = simple.token_stream(LOG_TEST_DATA);
-
-    let mut simple_tokenizer_tokens = 0;
-    let mut log_tokenizer_tokens = 0;
-
     group.bench_function("logs_simple_tokenizer", |b| {
         b.iter(|| {
+            let simple = TextAnalyzer::from(SimpleTokenizer);
+            let mut simple_stream = simple.token_stream(LOG_TEST_DATA);
+            let mut simple_tokenizer_tokens = 0;
+
             while simple_stream.advance() {
                 simple_tokenizer_tokens += 1;
             }
+            assert_ne!(simple_tokenizer_tokens, 0);
         })
     });
 
     group.bench_function("logs_log_tokenizer", |b| {
         b.iter(|| {
+            let log = TextAnalyzer::from(LogTokenizer);
+            let mut log_stream = log.token_stream(LOG_TEST_DATA);
+            let mut log_tokenizer_tokens = 0;
+
             while log_stream.advance() {
                 log_tokenizer_tokens += 1;
             }
+            assert_ne!(log_tokenizer_tokens, 0);
         })
     });
-
-    assert_ne!(simple_tokenizer_tokens, log_tokenizer_tokens);
 }
 
 criterion_group!(benches, log_tokenizer_benchmark);

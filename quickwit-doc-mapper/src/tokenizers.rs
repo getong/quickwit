@@ -89,13 +89,17 @@ impl Tokenizer for LogTokenizer {
 impl<'a> LogTokenStream<'a> {
     fn search_token_end(&mut self) -> usize {
         (&mut self.chars)
-            .find_map(|(offset, ref character)| (!character.is_alphanumeric()).then_some(offset))
+            .filter(|(_, ref character)| !character.is_alphanumeric())
+            .map(|(offset, _)| offset)
+            .next()
             .unwrap_or(self.text.len())
     }
 
     fn handle_match(&mut self, offset_to: usize) -> usize {
         (&mut self.chars)
-            .find_map(|(index, _)| (index == offset_to).then_some(index))
+            .filter(|(index, _)| *index == offset_to)
+            .map(|(offset, _)| offset)
+            .next()
             .unwrap_or(self.text.len())
     }
 

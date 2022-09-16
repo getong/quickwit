@@ -28,44 +28,45 @@ use tantivy::tokenizer::{
 
 static REGEX_ERROR_MSG: &str = "Failed to compile regular expression. This should never happen! Please, report on https://github.com/quickwit-oss/quickwit/issues.";
 
-// The array is ordered according to how often we'd stumble upon the expression.
-// If an expression is bound to appear a lot, it should be at the smallest index possible
+// Regex array ordered by the most frequent pattern encountered in logs.
+// If an expression appears a lot, it should be place at the smallest index possible
 // to avoid iterating through the array as much as possible.
-static REGEX_ARRAY: Lazy<[Regex; 3]> = Lazy::new(|| {
+static REGEX_ARRAY: Lazy<[Regex; 2]> = Lazy::new(|| {
     [
-        // Regex to match numbers or numbers with certain characters that should not be split on
-        // (e.g IP addresses)
-        Regex::new("^[0-9][-/%_\\.:a-zA-Z0-9]*").expect(REGEX_ERROR_MSG),
-        // Date regex to match dates similar to "MMM d" and potentially followed by "yyyy" or a
-        // time format.
-        Regex::new("^[A-Za-z]{1,3}[ ]{1,2}[0-9]{1,2}([ ]{1,2}[0-9]+[-_/:0-9]*)?")
-            .expect(REGEX_ERROR_MSG),
-        // Regex to match URI (URLs for example, http and https), Unix filesystem paths
-        // or identifiers
-        // If matching an URI, the regex is build to match:
-        //      Protocol followed by a domain name and domain extension and finally
-        //      the path and query if any
-        // If matching a path, accepts relative or absolute paths
-        // If matching identifiers, matches any sequences of alphanumeric characters
-        // separated by '-', '_', ':', '%' or '/'
-        Regex::new("^(https?://|\\.?/)?[-a-zA-Z0-9\\./:%_]+[a-zA-Z0-9]+/?").expect(REGEX_ERROR_MSG),
+        // Regex to match identifiers: IP, URI, UUID, Dates...
+        Regex::new(
+            r"(?xi)             # Multiline regex that ignores case.
+        ^
+        ([a-z0-9]+://)?             # Optional scheme: https, file, s3,...
+        [/\.]*                      # Optional file prefix path: ./../path
+        [a-z0-9]+                   # Identifier starts with an alphanumeric...
+        [-/%_\\.:]                  # And must be followed by a special character to form an ID.
+        [-/%_\\.:a-z0-9]+           # Authorized identifier characters. 
+        [/a-z0-9]                   # Identifier must end with an alphanumeric.
+        ",
+        )
+        .expect(REGEX_ERROR_MSG),
+        // Regex to match dates that starts with a month. Such a format is common in syslog.
+        Regex::new(
+            r"(?xi)              # Multiline regex that ignores case.
+        ^
+        [a-z]{2,3}                  # Month.
+        \s{1,2}                     # Space separator.
+        [0-9]{1,2}                  # Year/day.
+        (\s{1,2}[0-9]+[-_/:0-9]*)?  # Year/day/hours/minutes/seconds.
+        ",
+        )
+        .expect(REGEX_ERROR_MSG),
     ]
 });
 
-/// Log friendly Tokenizer that avoids splittings on ponctuation in:
-///     - IP addresses (both ipv4 and ipv6)
-///     - Common characters found in identifiers (".", "-", alphanumeric characters etc...)
-///     - Date-time formats (some examples):
-///         - ISO 8601
-///         - Any combination of d, m and y seperated by '.', '-', ':', '_' and '/'
-///         - Any combination of h, m and s seperated by '.', '-', ':', '_' and '/'
-///         - MMM d yyyy
-///     - URIs such as http and https
-///
-/// The tokenizer still works in full text cases such as log messages.
-///
-/// The Log tokenizer is registered in quickwit's token manager and can be obtained
-/// with the key "log".
+/// Log friendly tokenizer that avoids splittings on ponctuation in:
+/// - IP addresses (both ipv4 and ipv6).
+/// - Common characters found in identifiers (".", "-", alphanumeric characters...).
+/// - Date-time formats (some examples): + ISO 8601. + Any combination of d, m and y seperated by
+///   '.', '-', ':', '_' and '/'. + Any combination of h, m and s seperated by '.', '-', ':', '_'
+///   and '/'. + MMM d yyyy. + ...
+/// - URIs such as URL and filepath.
 #[derive(Clone)]
 pub struct LogTokenizer;
 
@@ -115,14 +116,11 @@ impl<'a> TokenStream for LogTokenStream<'a> {
         self.token.text.clear();
         self.token.position = self.token.position.wrapping_add(1);
 
-        // TODO Replace iterator with index maybe ?
         while let Some((offset_from, current_character)) = self.chars.next() {
             let text_substring = &self.text[offset_from..];
 
-            // First, try to find a pattern where splitting on ponctuation isn't ideal from
-            // the array of expressions.
-            // If found, advance the iterator to the start of the next token and push
-            // the token in the stream.
+            // Tries first to find a matching regex. If found, advances the iterator to the
+            // start of the next token and push the token in the stream.
             for regex in REGEX_ARRAY.iter() {
                 if let Some(regex_match) = regex.find(text_substring) {
                     let offset_to = self.handle_match(offset_from + regex_match.end());
@@ -132,13 +130,8 @@ impl<'a> TokenStream for LogTokenStream<'a> {
                 }
             }
 
-            // This case is when we don't have a regex match so the default behaviour
-            // is needed.
-            // Either the current character is alphabetic and should be tokenized accordingly, or
-            // it is a ponctuation character and should be ignored
-            // (The current character shouldn't be a digit at this point since it would have been
-            // matched by an expression in the array above but just in case, expects
-            // alphanumeric characters)
+            // When no regex is match, falls back to the simple tokenizer that splits on non
+            // alphanumeric characters.
             if current_character.is_alphanumeric() {
                 let offset_to = self.search_token_end();
                 self.push_token(offset_from, offset_to);
@@ -161,17 +154,14 @@ impl<'a> TokenStream for LogTokenStream<'a> {
 
 fn get_quickwit_tokenizer_manager() -> TokenizerManager {
     let raw_tokenizer = TextAnalyzer::from(RawTokenizer).filter(RemoveLongFilter::limit(100));
-
-    // TODO eventually check for other restrictions
     let log_tokenizer = TextAnalyzer::from(LogTokenizer).filter(RemoveLongFilter::limit(100));
-
     let tokenizer_manager = TokenizerManager::default();
     tokenizer_manager.register("raw", raw_tokenizer);
     tokenizer_manager.register("log", log_tokenizer);
     tokenizer_manager
 }
 
-/// Quickwits default tokenizer
+/// Quickwits default tokenizer.
 pub static QUICKWIT_TOKENIZER_MANAGER: Lazy<TokenizerManager> =
     Lazy::new(get_quickwit_tokenizer_manager);
 

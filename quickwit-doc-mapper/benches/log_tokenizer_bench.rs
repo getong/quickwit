@@ -17,6 +17,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+use std::time::Duration;
+
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use quickwit_doc_mapper::tokenizers::LogTokenizer;
 use tantivy::tokenizer::{SimpleTokenizer, TextAnalyzer};
@@ -27,31 +29,35 @@ pub fn log_tokenizer_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("log_tokenizer_benchmark");
     group.throughput(Throughput::Bytes(LOG_TEST_DATA.len() as u64));
 
-    group.bench_function("logs_simple_tokenizer", |b| {
-        b.iter(|| {
-            let simple = TextAnalyzer::from(SimpleTokenizer);
-            let mut simple_stream = simple.token_stream(LOG_TEST_DATA);
-            let mut simple_tokenizer_tokens = 0;
+    group
+        .measurement_time(Duration::from_secs(10))
+        .bench_function("logs_simple_tokenizer", |b| {
+            b.iter(|| {
+                let simple = TextAnalyzer::from(SimpleTokenizer);
+                let mut simple_stream = simple.token_stream(LOG_TEST_DATA);
+                let mut simple_tokenizer_tokens = 0;
 
-            while simple_stream.advance() {
-                simple_tokenizer_tokens += 1;
-            }
-            assert_ne!(simple_tokenizer_tokens, 0);
-        })
-    });
+                while simple_stream.advance() {
+                    simple_tokenizer_tokens += 1;
+                }
+                assert_ne!(simple_tokenizer_tokens, 0);
+            })
+        });
 
-    group.bench_function("logs_log_tokenizer", |b| {
-        b.iter(|| {
-            let log = TextAnalyzer::from(LogTokenizer);
-            let mut log_stream = log.token_stream(LOG_TEST_DATA);
-            let mut log_tokenizer_tokens = 0;
+    group
+        .measurement_time(Duration::from_secs(10))
+        .bench_function("logs_log_tokenizer", |b| {
+            b.iter(|| {
+                let log = TextAnalyzer::from(LogTokenizer);
+                let mut log_stream = log.token_stream(LOG_TEST_DATA);
+                let mut log_tokenizer_tokens = 0;
 
-            while log_stream.advance() {
-                log_tokenizer_tokens += 1;
-            }
-            assert_ne!(log_tokenizer_tokens, 0);
-        })
-    });
+                while log_stream.advance() {
+                    log_tokenizer_tokens += 1;
+                }
+                assert_ne!(log_tokenizer_tokens, 0);
+            })
+        });
 }
 
 criterion_group!(benches, log_tokenizer_benchmark);

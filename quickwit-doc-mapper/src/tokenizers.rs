@@ -41,7 +41,7 @@ static REGEX_ARRAY: Lazy<[Regex; 2]> = Lazy::new(|| {
         [/\.]*                      # Optional file prefix path: ./../path
         [a-z0-9]+                   # Identifier starts with an alphanumeric...
         [-/%_\\.:]                  # And must be followed by a special character to form an ID.
-        [-/%_\\.:a-z0-9]+           # Authorized identifier characters. 
+        [-/%_\\.:$@,a-z0-9]+          # Authorized identifier characters. 
         [/a-z0-9]                   # Identifier must end with an alphanumeric.
         ",
         )
@@ -411,6 +411,64 @@ mod tests {
             "value",
             "variable",
             "value",
+        ];
+
+        log_tokenizer_test_helper(test_string, &array_ref)
+    }
+
+    #[test]
+    fn test_log_proxifier() {
+        // Source: https://github.com/logpai/loghub/blob/master/Proxifier/Proxifier_2k.log.
+        let test_string = r"[10.30 16:49:06] chrome.exe - proxy.cse.cuhk.edu.hk:5070 open through proxy proxy.cse.cuhk.edu.hk:5070 HTTPS";
+        let array_ref: [&str; 9] = [
+            "10.30",
+            "16:49:06",
+            "chrome.exe",
+            "proxy.cse.cuhk.edu.hk:5070",
+            "open",
+            "through",
+            "proxy",
+            "proxy.cse.cuhk.edu.hk:5070",
+            "HTTPS",
+        ];
+
+        log_tokenizer_test_helper(test_string, &array_ref)
+    }
+
+    #[test]
+    fn test_log_zookeeper() {
+        // Source: https://github.com/logpai/loghub/blob/master/Zookeeper/Zookeeper_2k.log.
+        let test_string = r"2015-07-29 19:04:12,394 - INFO  [/10.10.34.11:3888:QuorumCnxManager$Listener@493] - Received connection request /10.10.34.11:45307";
+        let array_ref: [&str; 8] = [
+            "2015-07-29",
+            "19:04:12,394",
+            "INFO",
+            "/10.10.34.11:3888:QuorumCnxManager$Listener@493",
+            "Received",
+            "connection",
+            "request",
+            "value",
+        ];
+
+        log_tokenizer_test_helper(test_string, &array_ref)
+    }
+
+    #[test]
+    fn test_log_hadoop() {
+        // Source: https://github.com/logpai/loghub/blob/master/Hadoop/Hadoop_2k.log.
+        let test_string = r"2015-10-18 18:01:50,556 INFO [main] org.apache.hadoop.yarn.event.AsyncDispatcher: Registering class org.apache.hadoop.mapreduce.v2.app.job.event.TaskAttemptEventType for class org.apache.hadoop.mapreduce.v2.app.MRAppMaster$TaskAttemptEventDispatcher";
+        let array_ref: [&str; 11] = [
+            "2015-10-18",
+            "18:01:50,556",
+            "INFO",
+            "main",
+            "org.apache.hadoop.yarn.event.AsyncDispatcher",
+            "Registering",
+            "class",
+            "org.apache.hadoop.mapreduce.v2.app.job.event.TaskAttemptEventType",
+            "for",
+            "class",
+            "org.apache.hadoop.mapreduce.v2.app.MRAppMaster$TaskAttemptEventDispatcher",
         ];
 
         log_tokenizer_test_helper(test_string, &array_ref)

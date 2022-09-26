@@ -385,6 +385,7 @@ impl IndexingService {
                 .merge_policy
                 .max_merge_factor,
             split_num_docs_target: index_metadata.indexing_settings.split_num_docs_target,
+            max_merge_ops_opt: index_metadata.indexing_settings.merge_policy.max_merge_ops,
             ..Default::default()
         };
         let merge_policy: Arc<dyn MergePolicy> = Arc::new(stable_multitenant_merge_policy);

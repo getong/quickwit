@@ -111,6 +111,9 @@ pub struct MergePolicy {
     pub merge_factor: usize,
     #[serde(default = "MergePolicy::default_max_merge_factor")]
     pub max_merge_factor: usize,
+    #[serde(default)]
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub max_merge_ops: Option<usize>,
 }
 
 impl PartialEq for MergePolicy {
@@ -137,6 +140,7 @@ impl Default for MergePolicy {
             __demux_factor_deprecated: serde::de::IgnoredAny,
             merge_factor: Self::default_merge_factor(),
             max_merge_factor: Self::default_max_merge_factor(),
+            max_merge_ops: None
         }
     }
 }
@@ -703,6 +707,34 @@ mod tests {
             );
             assert!(index_config.sources.is_empty());
         }
+    }
+
+    #[test]
+    fn test_merge_policy_index_config_max_merge_ops_ignored_if_none() {
+        let merge_policy = MergePolicy::default();
+        let merge_policy_json = serde_json::to_value(&merge_policy).unwrap();
+        assert_eq!(
+            &merge_policy_json,
+            &serde_json::json!({
+                "max_merge_factor": 12,
+                "merge_factor": 10
+            })
+        );
+    }
+
+    #[test]
+    fn test_merge_policy_index_config_with_max_merge_ops() {
+        let mut merge_policy = MergePolicy::default();
+        merge_policy.max_merge_ops = Some(4);
+        let merge_policy_json = serde_json::to_value(&merge_policy).unwrap();
+        assert_eq!(
+            &merge_policy_json,
+            &serde_json::json!({
+                "max_merge_factor": 12,
+                "merge_factor": 10,
+                "max_merge_ops": 4
+            })
+        );
     }
 
     #[tokio::test]

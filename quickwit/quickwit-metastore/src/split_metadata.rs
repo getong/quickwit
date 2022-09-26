@@ -121,6 +121,8 @@ pub struct SplitMetadata {
 
     /// Delete opstamp.
     pub delete_opstamp: u64,
+
+    pub num_merge_ops: usize,
 }
 
 impl SplitMetadata {

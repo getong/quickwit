@@ -131,6 +131,7 @@ pub struct StableWithTimestampMergePolicy {
     pub merge_enabled: bool,
     pub merge_factor: usize,
     pub max_merge_factor: usize,
+    pub max_merge_ops_opt: Option<usize>,
     /// The merge policy aims to eventually produce mature splits that have a larger size but
     /// are within close range of `split_num_docs_target`.
     ///
@@ -146,6 +147,7 @@ impl Default for StableWithTimestampMergePolicy {
             merge_enabled: true,
             merge_factor: 10,
             max_merge_factor: 12,
+            max_merge_ops_opt: None,
             split_num_docs_target: 10_000_000,
         }
     }
@@ -223,7 +225,11 @@ impl StableWithTimestampMergePolicy {
         if !self.merge_enabled {
             return true;
         }
-
+        if let Some(max_merge_ops) = self.max_merge_ops_opt {
+            if split.num_merge_ops >= max_merge_ops {
+                return true;
+            }
+        }
         split.num_docs >= self.split_num_docs_target
     }
 

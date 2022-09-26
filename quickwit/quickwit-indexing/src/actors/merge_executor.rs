@@ -287,6 +287,14 @@ async fn merge_split_directories(
     Ok(output_directory)
 }
 
+fn max_merge_ops_after_merge(splits: &[SplitMetadata]) -> usize {
+    splits
+        .iter()
+        .map(|split_metadata| split_metadata.num_merge_ops)
+        .max()
+        .unwrap_or(0)
+}
+
 impl MergeExecutor {
     pub fn new(
         pipeline_id: IndexingPipelineId,
@@ -358,6 +366,7 @@ impl MergeExecutor {
                 num_docs,
                 uncompressed_docs_size_in_bytes,
                 delete_opstamp,
+                num_merge_ops: max_merge_ops_after_merge(&splits) + 1,
             },
             index: merged_index,
             split_scratch_directory: merge_scratch_directory,
@@ -477,6 +486,9 @@ impl MergeExecutor {
             pipeline_ord: split.pipeline_ord,
             source_id: split.source_id.clone(),
         };
+
+        let num_merge_ops: usize = max_merge_ops_after_merge(&splits);
+
         let indexed_split = IndexedSplit {
             split_attrs: SplitAttrs {
                 split_id: merge_split_id,
@@ -487,6 +499,7 @@ impl MergeExecutor {
                 num_docs,
                 uncompressed_docs_size_in_bytes,
                 delete_opstamp: last_delete_opstamp,
+                num_merge_ops,
             },
             index: merged_index,
             split_scratch_directory: merge_scratch_directory,

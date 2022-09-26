@@ -228,6 +228,7 @@ fn create_split_metadata(split: &PackagedSplit, footer_offsets: Range<u64>) -> S
         tags: split.tags.clone(),
         footer_offsets,
         delete_opstamp: split.split_attrs.delete_opstamp,
+        num_merge_ops: split.split_attrs.num_merge_ops,
     }
 }
 

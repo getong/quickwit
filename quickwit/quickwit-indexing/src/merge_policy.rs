@@ -93,9 +93,9 @@ pub trait MergePolicy: Send + Sync + fmt::Debug {
     fn is_mature(&self, split: &SplitMetadata) -> bool;
 }
 
-/// StableMultitenantMergePolicy is a rather naive implementation optimized
+/// `StableWithTimestampMergePolicy` is a rather naive implementation optimized
 /// for splits produced by a rather stable stream of splits,
-/// with incoming documents ordered more or less as expected time, so that splits are
+/// with incoming documents loosely ordered by a timestamp, so that splits are
 /// time pruning is efficient out of the box.
 ///
 /// The logic goes as follows.
@@ -126,7 +126,7 @@ pub trait MergePolicy: Send + Sync + fmt::Debug {
 /// Because we stop merging splits reaching a size larger than if it would result in a size larger
 /// than `target_num_docs`.
 #[derive(Clone, Debug)]
-pub struct StableMultitenantWithTimestampMergePolicy {
+pub struct StableWithTimestampMergePolicy {
     pub min_level_num_docs: usize,
     pub merge_enabled: bool,
     pub merge_factor: usize,
@@ -139,9 +139,9 @@ pub struct StableMultitenantWithTimestampMergePolicy {
     pub split_num_docs_target: usize,
 }
 
-impl Default for StableMultitenantWithTimestampMergePolicy {
+impl Default for StableWithTimestampMergePolicy {
     fn default() -> Self {
-        StableMultitenantWithTimestampMergePolicy {
+        StableWithTimestampMergePolicy {
             min_level_num_docs: 100_000,
             merge_enabled: true,
             merge_factor: 10,
@@ -180,7 +180,7 @@ fn splits_short_debug(splits: &[SplitMetadata]) -> Vec<SplitShortDebug> {
     splits.iter().map(SplitShortDebug).collect()
 }
 
-impl MergePolicy for StableMultitenantWithTimestampMergePolicy {
+impl MergePolicy for StableWithTimestampMergePolicy {
     fn operations(&self, splits: &mut Vec<SplitMetadata>) -> Vec<MergeOperation> {
         let original_num_splits = splits.len();
         let operations = self.merge_operations(splits);
@@ -215,7 +215,7 @@ enum MergeCandidateSize {
     OneMoreSplitWouldBeTooBig,
 }
 
-impl StableMultitenantWithTimestampMergePolicy {
+impl StableWithTimestampMergePolicy {
     /// A mature split for merge is a split that won't undergo merge operation in the future.
     fn is_mature_for_merge(&self, split: &SplitMetadata) -> bool {
         // If merge is disabled, split is considered mature as it will not undergo a merge
@@ -440,12 +440,12 @@ mod tests {
 
     #[test]
     fn test_split_is_mature() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         // Split under max_merge_docs is not mature.
         let mut split = create_splits(vec![9_000_000]).into_iter().next().unwrap();
         assert!(!merge_policy.is_mature(&split));
         // All splits are mature when merge is disabled.
-        let merge_policy_with_disabled_merge = StableMultitenantWithTimestampMergePolicy {
+        let merge_policy_with_disabled_merge = StableWithTimestampMergePolicy {
             merge_enabled: false,
             ..Default::default()
         };
@@ -459,7 +459,7 @@ mod tests {
 
     #[test]
     fn test_build_split_levels() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let splits = Vec::new();
         let split_groups = merge_policy.build_split_levels(&splits);
         assert!(split_groups.is_empty());
@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn test_stable_multitenant_merge_policy_build_split_simple() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let splits = create_splits(vec![100_000, 100_000, 100_000, 800_000, 900_000]);
         let split_groups = merge_policy.build_split_levels(&splits);
         assert_eq!(&split_groups, &[0..3, 3..5]);
@@ -475,7 +475,7 @@ mod tests {
 
     #[test]
     fn test_stable_multitenant_merge_policy_build_split_perfect_world() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let splits = create_splits(vec![
             100_000, 100_000, 100_000, 100_000, 100_000, 100_000, 100_000, 100_000, 800_000,
             1_600_000,
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn test_stable_multitenant_merge_policy_build_split_decreasing() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let splits = create_splits(vec![
             100_000, 100_000, 100_000, 100_000, 100_000, 100_000, 100_000, 100_000, 800_000,
             100_000, 1_600_000,
@@ -498,14 +498,14 @@ mod tests {
     #[test]
     #[should_panic(expected = "All splits are expected to be smaller than `max_merge_docs`.")]
     fn test_stable_multitenant_merge_policy_build_split_panics_if_exceeding_max_merge_docs() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let splits = create_splits(vec![11_000_000]);
         merge_policy.build_split_levels(&splits);
     }
 
     #[test]
     fn test_stable_multitenant_merge_policy_not_enough_splits() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let mut splits = create_splits(vec![100; 7]);
         assert_eq!(splits.len(), 7);
         assert!(merge_policy.operations(&mut splits).is_empty());
@@ -513,7 +513,7 @@ mod tests {
 
     #[test]
     fn test_stable_multitenant_merge_policy_just_enough_splits_for_a_merge() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let mut splits = create_splits(vec![100; 10]);
         let mut merge_ops = merge_policy.operations(&mut splits);
         assert!(splits.is_empty());
@@ -536,7 +536,7 @@ mod tests {
 
     #[test]
     fn test_stable_multitenant_merge_policy_many_splits_on_same_level() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let mut splits = create_splits(vec![100; 13]);
         let mut merge_ops = merge_policy.operations(&mut splits);
         assert_eq!(splits.len(), 1);
@@ -560,7 +560,7 @@ mod tests {
 
     #[test]
     fn test_stable_multitenant_merge_policy_splits_below_min_level() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let mut splits = create_splits(vec![
             100, 1000, 10_000, 10_000, 10_000, 10_000, 10_000, 40_000, 40_000, 40_000,
         ]);
@@ -585,7 +585,7 @@ mod tests {
 
     #[test]
     fn test_stable_multitenant_merge_policy_splits_above_min_level() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let mut splits = create_splits(vec![
             100_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000,
         ]);
@@ -596,7 +596,7 @@ mod tests {
 
     #[test]
     fn test_stable_multitenant_merge_policy_above_max_merge_docs_is_ignored() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let mut splits = create_splits(vec![
             100_000, 100_000, 100_000, 100_000, 100_000,
             10_000_000, // this split should not interfere with the merging of other splits
@@ -610,7 +610,7 @@ mod tests {
 
     #[test]
     fn test_merge_policy_splits_too_large_are_ignored() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let mut splits = create_splits(vec![9_999_999, 10_000_000]);
         let merge_ops = merge_policy.operations(&mut splits);
         assert_eq!(splits.len(), 2);
@@ -621,7 +621,7 @@ mod tests {
 
     #[test]
     fn test_merge_policy_splits_entire_level_reach_merge_max_doc() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let mut splits = create_splits(vec![5_000_000, 5_000_000]);
         let merge_ops = merge_policy.operations(&mut splits);
         assert!(splits.is_empty());
@@ -631,7 +631,7 @@ mod tests {
 
     #[test]
     fn test_merge_policy_last_merge_can_have_a_lower_merge_factor() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let mut splits = create_splits(vec![9_999_997, 9_999_998, 9_999_999]);
         let merge_ops = merge_policy.operations(&mut splits);
         assert_eq!(splits.len(), 1);
@@ -642,7 +642,7 @@ mod tests {
 
     #[test]
     fn test_merge_policy_no_merge_with_only_one_split() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         let mut splits = create_splits(vec![9_999_999]);
         let merge_ops = merge_policy.operations(&mut splits);
         assert_eq!(splits.len(), 1);
@@ -652,7 +652,7 @@ mod tests {
 
     #[test]
     fn test_stable_multitenant_merge_policy_max_num_splits_worst_case() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         assert_eq!(merge_policy.max_num_splits_worst_case(99), 9);
         assert_eq!(merge_policy.max_num_splits_worst_case(1_000_000), 27);
         assert_eq!(merge_policy.max_num_splits_worst_case(2_000_000), 36);
@@ -668,7 +668,7 @@ mod tests {
 
     #[test]
     fn test_stable_multitenant_merge_policy_max_num_splits_ideal_case() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy::default();
+        let merge_policy = StableWithTimestampMergePolicy::default();
         assert_eq!(merge_policy.max_num_splits_ideal_case(1_000_000), 18);
         assert_eq!(merge_policy.max_num_splits_ideal_case(99), 9);
         assert_eq!(merge_policy.max_num_splits_ideal_case(2_000_000), 20);
@@ -683,7 +683,7 @@ mod tests {
 
     #[test]
     fn test_stable_multitenant_merge_policy_merge_not_enabled() {
-        let merge_policy = StableMultitenantWithTimestampMergePolicy {
+        let merge_policy = StableWithTimestampMergePolicy {
             merge_enabled: false,
             ..Default::default()
         };

@@ -38,7 +38,7 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-use crate::merge_policy::{MergePolicy, StableMultitenantWithTimestampMergePolicy};
+use crate::merge_policy::{MergePolicy, StableWithTimestampMergePolicy};
 use crate::models::{
     DetachPipeline, IndexingDirectory, IndexingPipelineId, Observe, ObservePipeline,
     ShutdownPipeline, ShutdownPipelines, SpawnMergePipeline, SpawnPipeline, SpawnPipelines,
@@ -377,7 +377,7 @@ impl IndexingService {
             }
         }
 
-        let stable_multitenant_merge_policy = StableMultitenantWithTimestampMergePolicy {
+        let stable_multitenant_merge_policy = StableWithTimestampMergePolicy {
             merge_enabled: index_metadata.indexing_settings.merge_enabled,
             merge_factor: index_metadata.indexing_settings.merge_policy.merge_factor,
             max_merge_factor: index_metadata

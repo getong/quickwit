@@ -287,6 +287,14 @@ async fn merge_split_directories(
     Ok(output_directory)
 }
 
+fn max_merge_ops(splits: &[SplitMetadata]) -> usize {
+    splits
+        .iter()
+        .map(|split| split.num_merge_ops)
+        .max()
+        .unwrap_or(0)
+}
+
 impl MergeExecutor {
     pub fn new(
         pipeline_id: IndexingPipelineId,
@@ -358,6 +366,7 @@ impl MergeExecutor {
                 num_docs,
                 uncompressed_docs_size_in_bytes,
                 delete_opstamp,
+                num_merge_ops: max_merge_ops(&splits[..]) + 1,
             },
             index: merged_index,
             split_scratch_directory: merge_scratch_directory,
@@ -487,6 +496,7 @@ impl MergeExecutor {
                 num_docs,
                 uncompressed_docs_size_in_bytes,
                 delete_opstamp: last_delete_opstamp,
+                num_merge_ops: max_merge_ops(&splits[..]),
             },
             index: merged_index,
             split_scratch_directory: merge_scratch_directory,
@@ -590,21 +600,13 @@ mod tests {
             universe.spawn_builder().spawn(merge_executor);
         merge_executor_mailbox.send_message(merge_scratch).await?;
         merge_executor_handle.process_pending_and_observe().await;
-        let mut packager_msgs = merge_packager_inbox.drain_for_test();
+        let packager_msgs: Vec<IndexedSplitBatch> = merge_packager_inbox.drain_for_test_typed();
         assert_eq!(packager_msgs.len(), 1);
-        let packager_msg = packager_msgs
-            .pop()
-            .unwrap()
-            .downcast::<IndexedSplitBatch>()
-            .unwrap();
-        assert_eq!(packager_msg.splits[0].split_attrs.num_docs, 4);
-        assert_eq!(
-            packager_msg.splits[0]
-                .split_attrs
-                .uncompressed_docs_size_in_bytes,
-            136
-        );
-        let reader = packager_msg.splits[0].index.reader()?;
+        assert_eq!(packager_msgs[0].splits[0].split_attrs.num_docs, 4);
+        let split_attrs_after_merge = &packager_msgs[0].splits[0].split_attrs;
+        assert_eq!(split_attrs_after_merge.uncompressed_docs_size_in_bytes, 136);
+        assert_eq!(split_attrs_after_merge.num_merge_ops, 1);
+        let reader = packager_msgs[0].splits[0].index.reader()?;
         let searcher = reader.searcher();
         assert_eq!(searcher.segment_readers().len(), 1);
         Ok(())

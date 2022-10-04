@@ -97,7 +97,17 @@ impl Handler<NewSplits> for MergePlanner {
                 .partitioned_young_splits
                 .entry(partition_id)
                 .or_default();
-            young_splits.extend(new_young_splits);
+            for new_young_split in new_young_splits {
+                // Due to the recycling of the mailbox of the merge planner, it is possible for
+                // a split already in store to be received.
+                let split_already_known = young_splits
+                    .iter()
+                    .any(|split| split.split_id() == new_young_split.split_id());
+                if split_already_known {
+                    continue;
+                }
+                young_splits.push(new_young_split);
+            }
             target_partition_ids.push(partition_id);
         }
         self.send_merge_ops(ctx, &target_partition_ids).await?;

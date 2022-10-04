@@ -289,7 +289,6 @@ impl IndexingService {
             self.metastore.clone(),
             storage,
             split_store,
-            merge_policy,
             ctx.mailbox().clone(),
         );
         let pipeline = IndexingPipeline::new(pipeline_params);

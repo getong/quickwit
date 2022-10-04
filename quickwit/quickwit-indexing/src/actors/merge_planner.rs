@@ -152,7 +152,7 @@ impl MergePlanner {
 
 /// We can merge splits from the same (index_id, source_id, node_id).
 fn belongs_to_pipeline(pipeline_id: &IndexingPipelineId, split: &SplitMetadata) -> bool {
-    pipeline_id.index_id == split.index_id &&
-    pipeline_id.source_id == split.source_id &&
-    pipeline_id.node_id == split.node_id
+    pipeline_id.index_id == split.index_id
+        && pipeline_id.source_id == split.source_id
+        && pipeline_id.node_id == split.node_id
 }
